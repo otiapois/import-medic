@@ -7,6 +7,10 @@ import { repairCsv } from '../../../src/core';
 import { sha256 } from '../../../src/core/audit/custody';
 import { analyzeCatalogImpact, createCatalogImpact } from '../../../src/core/analytics/catalog-impact';
 import { parseBigCommerceBaseline } from '../../../src/core/bigcommerce-price-diff/source';
+import { buildCatalogMigration, type CatalogPlatform } from '../../../src/core/catalog-migrator/engine';
+import { readBigCommerce } from '../../../src/core/catalog-migrator/bigcommerce';
+import { readShopify } from '../../../src/core/catalog-migrator/shopify';
+import { readWooCommerceCatalog } from '../../../src/core/catalog-migrator/woocommerce';
 import { decodeCsv, parseCsv, serializeCsv } from '../../../src/core/csv';
 import { guardSpreadsheetCell } from '../../../src/core/formula-guard';
 import { buildPromoCampaign, type PromoCampaignOptions } from '../../../src/core/promo-campaign/engine';
@@ -1293,7 +1297,99 @@ it('replays 1,200 version 1–6 recipe cases across exact worksheet mappings', (
   ), { seed: seed + 28, numRuns: 1_200 });
 }, 60_000);
 
-it('accounts for all 20,100 seeded executions without skips', () => {
-  expect(fuzzExecutions).toEqual({ accepted: 20_100, discarded: 0, properties: 29 });
+const catalogPlatforms: CatalogPlatform[] = ['shopify', 'woocommerce', 'bigcommerce'];
+const catalogDirections = catalogPlatforms.flatMap(source => catalogPlatforms.filter(target => source !== target).map(target => [source, target] as const));
+const catalogParsers = { shopify: readShopify, woocommerce: readWooCommerceCatalog, bigcommerce: readBigCommerce };
+const catalogDamage = ['corrupt-price', 'inverted-price', 'duplicate-sku', 'formula-sku', 'orphan'] as const;
+type CatalogDamage = typeof catalogDamage[number];
+
+function generatedCatalog(platform: CatalogPlatform, suffix: number, regular: string, sale: string, secondPrice: string, quantity: string,
+  color: string, damage?: CatalogDamage): Uint8Array {
+  const slug = 'canvas-' + suffix;
+  const title = 'Canvas, limited "' + suffix + '"';
+  const sku = '00' + suffix + '-A';
+  const alternate = damage === 'duplicate-sku' ? sku.toLowerCase() : damage === 'formula-sku' ? ' =2+2' : '00' + suffix + '-B';
+  const first = damage === 'corrupt-price' ? '1e2' : regular;
+  const discount = damage === 'inverted-price' ? regular : sale;
+  if (platform === 'shopify') {
+    return csvBytes(['Handle', 'Title', 'Option1 Name', 'Option1 Value', 'Option2 Name', 'Option2 Value', 'Variant SKU', 'Variant Price',
+      'Variant Compare At Price', 'Variant Inventory Tracker', 'Variant Inventory Qty', 'Variant Requires Shipping', 'Published', 'Status', 'Memo'], [
+      [slug, title, 'Color', color, 'Size', 'Small', sku, discount || first, first, 'shopify', quantity, 'FALSE', 'TRUE', 'active', 'Line one\nline two'],
+      [damage === 'orphan' ? 'unknown' : slug, '', '', 'Natural', '', 'Small', alternate, secondPrice, '', 'shopify', '0', 'FALSE', '', '', ''],
+    ]);
+  }
+  if (platform === 'woocommerce') {
+    return csvBytes(['ID', 'SKU', 'Name', 'Type', 'Parent', 'Regular price', 'Sale price', 'Stock', 'Attribute 1 name', 'Attribute 1 value(s)',
+      'Attribute 2 name', 'Attribute 2 value(s)', 'Published', 'Visibility in catalog', 'Memo'], [
+      ['51', slug, title, 'variable', '', '', '', '', 'Color', color.replace(/,/g, '\\,') + ', Natural', 'Size', 'Small', '1', 'visible', 'Line one\nline two'],
+      ['52', sku, title, 'variation, virtual', 'id:51', first, discount, quantity, 'Color', color.replace(/,/g, '\\,'), 'Size', 'Small', '1', '', ''],
+      ['53', alternate, title, 'variation, virtual', damage === 'orphan' ? 'id:99' : slug, secondPrice, '', '0', 'Color', 'Natural', 'Size', 'Small', '1', '', ''],
+    ]);
+  }
+  const base = ['Product', '100', 'digital', title, slug, '', regular, '', '', 'variant', 'true', '/' + slug + '/', 'Line one\nline two'];
+  const variants = [
+    ['Variant', '101', '', '', sku, 'Type=Dropdown|Name=Color|Value=' + color + '\nType=Dropdown|Name=Size|Value=Small', first, discount, quantity, '', '', '', ''],
+    ['Variant', '102', '', '', alternate, 'Type=Dropdown|Name=Color|Value=Natural\nType=Dropdown|Name=Size|Value=Small', secondPrice, '', '0', '', '', '', ''],
+  ];
+  return csvBytes(['Item', 'ID', 'Type', 'Name', 'SKU', 'Options', 'Price', 'Sale Price', 'Current Stock', 'Inventory Tracking', 'Is Visible',
+    'Product URL', 'Memo'], damage === 'orphan' ? [variants[0], base, variants[1]] : [base, ...variants]);
+}
+
+const catalogIdentity = (platform: CatalogPlatform, input: Uint8Array) =>
+  catalogParsers[platform](input, 'fuzz.csv').products.map(product => ({
+    title: product.title, grouped: product.grouped, variants: product.variants.map(variant => ({
+      sku: variant.sku, price: variant.prices, stock: variant.stock, shipping: variant.shipping,
+      options: variant.options.map(({ name, value }) => [name, value]),
+    })),
+  }));
+
+describe('M14 catalog migration', () => {
+  const baseCents = fc.bigInt({ min: 200n, max: 99_999_999n });
+  const discountedCents = fc.bigInt({ min: 0n, max: 199n });
+  const labels = fc.constantFrom('Indigo', 'Ink, storm', '青色', 'أزرق', 'Gris "Pierre"');
+  const suffixes = fc.nat({ max: 1_000_000_000 });
+  for (const [index, [source, target]] of catalogDirections.entries()) {
+    it('replays 350 exact ' + source + ' → ' + target + ' → ' + source + ' catalogs', async () => {
+      await checkAsyncFuzz(fc.asyncProperty(suffixes, baseCents, discountedCents, baseCents, fc.nat({ max: 9_999 }), labels,
+        async (suffix, base, discounted, second, qty, color) => {
+          const original = generatedCatalog(source, suffix, cents(base), cents(discounted), cents(second), String(qty).padStart(5, '0'), color);
+          const first = await buildCatalogMigration(source, target, original);
+          const output = first.artifacts.targetCsv?.bytes;
+          expect(first.issues.filter(issue => issue.level === 'blocked')).toEqual([]);
+          expect(first.unmappedColumns).toContain('Memo');
+          expect(first.summary).toEqual({ sourceProducts: 1, sourceVariants: 2, targetProducts: 1, targetVariants: 2, variantParity: true });
+          const expected = catalogIdentity(source, original);
+          expect(catalogIdentity(target, output!)).toEqual(expected);
+          const returned = await buildCatalogMigration(target, source, output!);
+          expect(returned.issues.filter(issue => issue.level === 'blocked')).toEqual([]);
+          expect(catalogIdentity(source, returned.artifacts.targetCsv!.bytes)).toEqual(expected);
+        }), { seed: seed + 29 + index, numRuns: 350 });
+    }, 60_000);
+
+    it('holds 70 adversarial ' + source + ' → ' + target + ' catalogs without issuing a target hash', async () => {
+      await checkAsyncFuzz(fc.asyncProperty(suffixes, baseCents, discountedCents, labels, fc.constantFrom(...catalogDamage),
+        async (suffix, base, discounted, color, damage) => {
+          const original = generatedCatalog(source, suffix, cents(base), cents(discounted), '23.47', '7', color, damage);
+          const result = await buildCatalogMigration(source, target, original);
+          expect(result.preview).toBeNull();
+          expect(result.artifacts.targetCsv).toBeNull();
+          expect(result.custody.targetSha256).toBeUndefined();
+          expect(result.custody.sourceSha256).toBe(createHash('sha256').update(original).digest('hex'));
+          const priceLine = source === 'shopify' ? 2 : 4;
+          const secondLine = source === 'shopify' ? 4 : source === 'woocommerce' ? 5 : 6;
+          const expectedIssue = damage === 'corrupt-price' ? { code: 'invalid-price', line: priceLine } :
+            damage === 'inverted-price' ? { code: 'inverted-price', line: priceLine } :
+              damage === 'duplicate-sku' ? { code: 'duplicate-sku', line: secondLine } :
+                damage === 'formula-sku' ? { code: 'unsafe-sku', line: secondLine } :
+                  source === 'shopify' ? { code: 'unsafe-title', line: secondLine } :
+                    source === 'woocommerce' ? { code: 'orphan-variation', line: secondLine } : { code: 'orphan-catalog-row', line: 2 };
+          expect(result.issues).toContainEqual(expect.objectContaining({ ...expectedIssue, level: 'blocked' }));
+        }), { seed: seed + 35 + index, numRuns: 70 });
+    }, 60_000);
+  }
+});
+
+it('accounts for all 22,620 seeded executions without skips', () => {
+  expect(fuzzExecutions).toEqual({ accepted: 22_620, discarded: 0, properties: 41 });
   console.info(`Deterministic fuzz: ${fuzzExecutions.accepted} accepted, ${fuzzExecutions.discarded} discarded across ${fuzzExecutions.properties} properties.`);
 });

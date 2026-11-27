@@ -1,0 +1,6 @@
+Item Type,Product ID,Product Type,Product Name,Product Code/SKU,Price,Sale Price,Product Weight,Stock Level,Track Inventory,Product Visible,Product URL,Product Description
+Product,51,physical,Canvas Weekender,canvas-weekender,24.99,,850,,by option,true,/canvas-weekender/,Packed separately
+SKU,52,,"[S]Color=Indigo,[RB]Size=Carry-on",00123,24.99,,850,7,,,,
+SKU,53,,"[S]Color=Sand,[RB]Size=Carry-on",0045-A,25.00,,900,0,,,,
+Rule,54,,,0045-A,[FIXED]25.00,,[ADD]50,,,,,
+Product,55,physical,Canvas Pouch,0002,10.99,8.49,200,3,by product,false,/canvas-pouch/,

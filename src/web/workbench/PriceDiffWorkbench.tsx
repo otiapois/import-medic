@@ -22,12 +22,14 @@ const PriceDiffReview = lazy(() => import('./PriceDiffReview').then(({ PriceDiff
 const VerifyImportPanel = lazy(() => import('./VerifyImportPanel'));
 const PromoCampaignPanel = lazy(() => import('./promo/PromoCampaignPanel'));
 const SupplierDeltaPanel = lazy(() => import('./supplier-delta/SupplierDeltaPanel'));
+const CatalogMigrationPanel = lazy(() => import('./catalog-migrator/CatalogMigrationPanel'));
 
 const STUDIO_MODES = [
   { id: 'build', label: 'Build Update' },
   { id: 'verify', label: 'Verify Update / Rollback CSV' },
   { id: 'campaign', label: 'Sale Campaign Pack' },
   { id: 'delta', label: 'Supplier Delta' },
+  { id: 'migrate', label: 'Migrate Catalog' },
 ] as const;
 
 type StudioMode = typeof STUDIO_MODES[number]['id'];
@@ -142,6 +144,7 @@ export function PriceDiffWorkbench({ characterKeys }: { characterKeys: boolean }
   const [verifyVisited, setVerifyVisited] = useState(false);
   const [campaignVisited, setCampaignVisited] = useState(false);
   const [deltaVisited, setDeltaVisited] = useState(false);
+  const [migrationVisited, setMigrationVisited] = useState(false);
   const [pairMode, setPairMode] = useState<PairMode>('build');
   const [buildPair, setBuildPair] = useState<GeneratedPairSource | null>(null);
   const [campaignPair, setCampaignPair] = useState<GeneratedPairSource | null>(null);
@@ -437,6 +440,7 @@ export function PriceDiffWorkbench({ characterKeys }: { characterKeys: boolean }
     if (next === 'build' || next === 'campaign') setPairMode(next);
     if (next === 'campaign') setCampaignVisited(true);
     if (next === 'delta') setDeltaVisited(true);
+    if (next === 'migrate') setMigrationVisited(true);
   }
 
   function openCampaignVerification() {
@@ -447,7 +451,7 @@ export function PriceDiffWorkbench({ characterKeys }: { characterKeys: boolean }
   const pairSource = pairMode === 'campaign' ? campaignPair : buildPair;
   const workbenchLabel = {
     build: `${platformLabel} Safe Price Update workbench`, verify: 'Verify Before Import workbench', campaign: 'Sale Campaign Pack workbench',
-    delta: 'Supplier Delta workbench',
+    delta: 'Supplier Delta workbench', migrate: 'Catalog migration workbench',
   }[mode];
 
   return (
@@ -605,6 +609,14 @@ export function PriceDiffWorkbench({ characterKeys }: { characterKeys: boolean }
         {deltaVisited ? (
           <Suspense fallback={<p className="price-section" role="status">Opening Supplier Delta…</p>}>
             <SupplierDeltaPanel />
+          </Suspense>
+        ) : null}
+      </div>
+      <div id={`${heading}-migrate-panel`} role="tabpanel" aria-labelledby={`${heading}-migrate-tab`}
+        className="workbench-input price-studio-pane" hidden={mode !== 'migrate'}>
+        {migrationVisited ? (
+          <Suspense fallback={<p className="price-section" role="status">Opening Catalog Migration…</p>}>
+            <CatalogMigrationPanel />
           </Suspense>
         ) : null}
       </div>

@@ -22,7 +22,7 @@ const stableText = (value: string) => value !== '' && value === value.trim() && 
 const optionPattern = /^\[(RB|S|RT|CS)\]([^=,\[\]]+)=([^=,\[\]]+)(?![\s\S])/;
 const swatchPattern = /:(?:#[a-f0-9]{6}(?:\|#[a-f0-9]{6}){0,2}|https?:\/\/[^\s]+)$/i;
 
-function variantOptions(name: string) {
+export function legacyVariantOptions(name: string, preserveOrder = false) {
   const options = new Map<string, { type: string; name: string; value: string }>();
   for (const option of name.split(',')) {
     const fields = optionPattern.exec(option);
@@ -32,7 +32,8 @@ function variantOptions(name: string) {
     if (!stableText(label) || !stableText(value) || options.has(key) || type === 'CS' && !swatchPattern.test(value)) return null;
     options.set(key, { type, name: label, value });
   }
-  return [...options].sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0).map(([, value]) => value);
+  return preserveOrder ? [...options.values()] :
+    [...options].sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0).map(([, value]) => value);
 }
 
 /** Legacy Bulk Edit catalog. Rule rows provide context and never enter the transfer. */
@@ -96,7 +97,7 @@ export function parseBigCommerceBaseline(bytes: Uint8Array, name = 'BigCommerce 
         issues.push(issue('baseline', 'invalid-bigcommerce-group', 'Keep existing SKU rows directly below their original Product row, before any Rule rows.', details(bigIdHeader, id)));
       }
       if (productId !== undefined) grouped.add(productId);
-      const options = variantOptions(name);
+      const options = legacyVariantOptions(name);
       const shape = options && JSON.stringify(options.map(({ type, name }) => [type, name]));
       const values = options && JSON.stringify(options.map(({ value }) => value.toLowerCase()));
       if (!shape || !values || (groupOptions !== undefined && shape !== groupOptions) || combinations.has(values)) {

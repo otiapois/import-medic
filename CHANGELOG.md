@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.4.0 (M14)
+
+- Open **Migrate Catalog** in the price workbench to convert a supported catalog CSV in any of the six directions between Shopify, WooCommerce, and BigCommerce. Review exact SKU text, parent and variant grouping, and the conversion between Shopify compare-at prices and regular and sale prices.
+- Inspect the field mapping, unmapped source columns, and physical source lines for issues. Download a target creation CSV after local re-parse and parity checks, plus a JSON audit and offline Migration Sign-Off with SHA-256 fingerprints.
+- Prepare WooCommerce creation CSVs with blank IDs for the destination store to assign. Use modern BigCommerce `Product` and `Variant` rows to carry separate regular and sale prices for individual variants. The store import is a separate manual step.
+
 ## v1.3.0 (M13)
 
 - Choose a visible Excel worksheet in each supplier slot. Each workbook initially uses its first visible worksheet. An explicit selection can be saved by exact name in a v6 supplier recipe and recorded in the audit and Client Sign-Off HTML. Recipes v1–v5 remain loadable.

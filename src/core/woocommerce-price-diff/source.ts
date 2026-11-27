@@ -2,6 +2,8 @@ import type { Baseline, DiffIssue, Variant } from '../shopify-price-diff/types';
 import { addLine, baselinePrice, duplicateIssues, readCsvTable, type CsvReadOptions } from '../shopify-price-diff/source';
 import { cellValue, issue } from '../shopify-price-diff/types';
 import { isScientific } from '../xlsx';
+import { amountGreaterThan, readAmount } from '../shopify-price-diff/prices';
+import { guardSpreadsheetCell } from '../formula-guard';
 
 export const wooRegularHeader = 'Regular price';
 export const wooSaleHeader = 'Sale price';
@@ -94,6 +96,25 @@ export function parseWooCommerceBaseline(bytes: Uint8Array, name = 'WooCommerce 
     }
   }
   if (!variants.length) issues.push(issue('baseline', 'missing-woo-products', 'No WooCommerce product records were found.'));
+  // All-blank ID creation files can be read for comparison, but still carry a blocking file issue.
+  // Existing update and rollback paths require IDs from a fresh export of the destination store.
+  if (variants.length && columns.has('Name') && issues.length === variants.length &&
+    issues.every(problem => problem.code === 'invalid-woo-id' && problem.value === '')) {
+    const linkedParents = new Set(variants.filter(variant => baseType(variant.woocommerce!.type) === 'variation')
+      .map(variant => variant.woocommerce!.parent));
+    const isCreation = variants.every(variant => {
+      const { type } = variant.woocommerce!;
+      const name = cellValue(variant.source, columns.get('Name')) ?? '';
+      if (!name.trim() || guardSpreadsheetCell(name) !== name || guardSpreadsheetCell(variant.sku) !== variant.sku) return false;
+      if (type === 'variable') return linkedParents.has(variant.sku) && !variant.price && !variant.compareAtPrice;
+      if (!['simple', 'variation'].includes(baseType(type)) || !baselinePrice.test(variant.price)) return false;
+      const sale = variant.compareAtPrice;
+      return !sale || baselinePrice.test(sale) && amountGreaterThan(readAmount(variant.price)!, readAmount(sale)!);
+    });
+    if (isCreation) issues.splice(0, issues.length, issue('baseline', 'woo-needs-destination-ids',
+      'This WooCommerce creation CSV has blank IDs. Products and prices can be previewed. Update and Rollback require a fresh WooCommerce store export containing assigned IDs.',
+      { row: source.headerRow, column: 'ID' }));
+  }
   return baseline;
 }
 

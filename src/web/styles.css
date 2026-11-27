@@ -527,10 +527,10 @@ code { font-family: var(--mono); }
 .delta-review .price-filters .button { border-radius: 999px; }
 .delta-table-region { min-width: 0; overflow-x: auto; border: 1px solid var(--line); border-radius: 9px; }
 .delta-table-region > p { padding: 8px 12px; }
-.delta-table { width: 100%; border-collapse: separate; border-spacing: 0; color: var(--ink); font-size: .875rem; text-align: start; }
-.delta-table th, .delta-table td { padding: 9px 10px; border-bottom: 1px solid var(--line); vertical-align: top; text-align: start; overflow-wrap: anywhere; }
-.delta-table thead th { background: var(--canvas); font-weight: 670; }
-.delta-table tbody tr:last-child > * { border-bottom: 0; }
+:is(.delta-table, .migration-mapping-table) { width: 100%; border-collapse: separate; border-spacing: 0; color: var(--ink); font-size: .875rem; text-align: start; }
+:is(.delta-table, .migration-mapping-table) :is(th, td) { padding: 9px 10px; border-bottom: 1px solid var(--line); vertical-align: top; text-align: start; overflow-wrap: anywhere; }
+:is(.delta-table, .migration-mapping-table) thead th { background: var(--canvas); font-weight: 670; }
+:is(.delta-table, .migration-mapping-table) tbody tr:last-child > * { border-bottom: 0; }
 .delta-table tbody th:first-child { min-width: 9ch; }
 .delta-table small, .delta-source-row { display: block; color: var(--muted); }
 .delta-table small { margin-top: 3px; font-size: .79rem; }
@@ -545,8 +545,30 @@ code { font-family: var(--mono); }
 .delta-issues li { padding: 7px 0; border-top: 1px solid var(--line); font-size: .875rem; }
 .delta-downloads { margin-top: 2px; }
 
+.migration-setup { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 13px; margin-top: 18px; }
+.migration-config, .migration-card { min-width: 0; padding: 13px; border: 1px solid var(--line); border-radius: 9px; overflow-wrap: anywhere; }
+.migration-platforms { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 10px; }
+.migration-platforms label { margin-bottom: 4px; }
+.migration-config .field-help { margin-top: 9px; }
+.migration-demo { max-width: 100%; margin-top: 9px; white-space: normal; }
+.migration-review { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; margin-top: 18px; }
+.migration-unmapped { padding: 9px 11px; margin-top: 8px; border-radius: 6px; background: var(--amber-soft); color: var(--amber); font-size: .875rem; }
+.migration-unmapped h4 { font-weight: 680; }
+.migration-columns { display: flex; flex-wrap: wrap; gap: 5px 7px; margin-top: 6px; }
+.migration-columns li { min-width: 0; max-width: 100%; padding: 3px 6px; border: 1px solid #b68740; border-radius: 4px; background: var(--surface); }
+.migration-mapping-scroll, .migration-preview { max-height: 288px; margin-top: 9px; overflow: auto; border: 1px solid var(--line); border-radius: 7px; }
+.migration-mapping-scroll:focus-visible { outline-offset: -3px; }
+.migration-mapping-table { min-width: 530px; }
+.migration-mapping-scroll thead th { position: sticky; top: 0; }
+.migration-preview { max-height: 390px; }
+.migration-preview th { white-space: nowrap; }
+.migration-preview .migration-option-expression { min-width: min-content; max-width: 34ch; overflow-wrap: normal; }
+.migration-review .custody-fingerprints { margin: 0; }
+.migration-downloads > .field-help { margin: 0 0 7px; }
+
 @media (max-width: 720px) {
   .supplier-delta .price-files { grid-template-columns: minmax(0, 1fr); }
+  .migration-setup { grid-template-columns: minmax(0, 1fr); }
   .delta-metrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .delta-table thead { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); }
   .delta-table, .delta-table tbody { display: block; }

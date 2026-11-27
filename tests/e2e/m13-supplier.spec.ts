@@ -63,7 +63,7 @@ async function hashLayout(elements: Locator) {
 async function compareFiles(page: Page, beginProcessing: () => void) {
   await openStudio(page, beginProcessing);
   const tabs = page.getByRole('tablist', { name: /studio/i });
-  await expect(tabs.getByRole('tab')).toHaveCount(4);
+  await expect(tabs.getByRole('tab')).toHaveCount(5);
   await expect(tabs.getByRole('tab', { name: 'Build Update' })).toHaveAttribute('aria-selected', 'true');
   await expect(tabs.getByRole('tab').nth(3)).toHaveAccessibleName('Supplier Delta');
   await tabs.getByRole('tab', { name: 'Supplier Delta' }).click();

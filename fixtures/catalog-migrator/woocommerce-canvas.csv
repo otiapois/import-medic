@@ -1,0 +1,4 @@
+ID,Type,SKU,Name,Parent,Regular price,Sale price,Stock,Published,Visibility in catalog,Weight (g),Attribute 1 name,Attribute 1 value(s),Attribute 1 global,Attribute 2 name,Attribute 2 value(s),Attribute 2 global,Purchase note
+51,variable,canvas-weekender,Canvas Weekender,,,,,1,visible,,Color,"Indigo, Sand",0,Size,Carry-on,0,Retain separately
+52,variation,00123,Canvas Weekender - Indigo,id:51,24.99,18.50,7,1,,850,Color,Indigo,0,Size,Carry-on,0,
+53,variation,0045-A,Canvas Weekender - Sand,canvas-weekender,25.00,,0,1,,900,Color,Sand,0,Size,Carry-on,0,

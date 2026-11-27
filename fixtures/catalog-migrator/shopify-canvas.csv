@@ -1,0 +1,5 @@
+Handle,Title,Option1 Name,Option1 Value,Option2 Name,Option2 Value,Variant SKU,Variant Price,Variant Compare At Price,Variant Inventory Tracker,Variant Inventory Qty,Variant Grams,Variant Requires Shipping,Status,Published,Custom label,Image Src
+canvas-weekender,Canvas Weekender,Color,Indigo,Size,Carry-on,00123,18.50,24.99,shopify,7,850,TRUE,active,TRUE,"Client notes
+for agency only",
+canvas-weekender,,,Sand,,Carry-on,0045-A,25.00,,shopify,0,900,TRUE,,,Wholesale,
+canvas-weekender,,,,,,,,,,,,,,,,https://assets.example.invalid/front.jpg
