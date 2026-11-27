@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { expect, it, vi } from 'vitest';
 import type { WorkerMessage, WorkerReply, WorkerRequest } from '../../../src/core/worker/protocol';
 
@@ -76,7 +77,43 @@ it('transfers repeatable verified byte pairs and clears stale exports on invalid
     await send({ type: 'loadSupplier', file: new File(['SKU,Price\n0007,21'], 'legacy-offers.csv') });
     expect(await send({ type: 'diff', sheetIndex: 0, selection: { confirmed: true }, resolutions: {} }))
       .toMatchObject({ kind: 'result', value: { canDownload: true, rollbackVerification: { restoredVariants: 1 } } });
+
+    const m13 = (name: string): File => new File([new Uint8Array(readFileSync(new URL(
+      `../../../fixtures/supplier-delta/${name}`, import.meta.url)))], name);
+    const workbook = m13('synthetic-pricebook.xlsx');
+    await send({ type: 'loadBaseline', file: m13('synthetic-shopify.csv') });
+    expect(await send({ type: 'loadSupplier', file: workbook, firstVisibleSheet: true })).toMatchObject({ kind: 'result', value: {
+      sheetNames: ['Instructions', 'Q4_Prices', 'Q3_Prices'], sheets: [{ name: 'Instructions' }],
+    } });
+    await send({ type: 'loadSupplier', file: workbook, supplierId: 'primary', sheetName: 'Q4_Prices' });
+    await send({ type: 'loadSupplier', file: workbook, supplierId: 'second', sheetName: 'Q3_Prices' });
+    await send({ type: 'loadSupplier', file: new File(['SKU,Cost\n00123,28.50'], 'third.csv'), supplierId: 'third' });
+    const columns = { joinKey: 'sku', skuColumn: 0, priceColumn: 1, confirmed: true } as const;
+    const batch = { type: 'diffBatch', conflictPolicy: 'prefer-first', conflictPolicyConfirmed: true,
+      suppliers: ['primary', 'second', 'third'].map((supplierId) => ({ supplierId, sheetIndex: 0, selection: columns, resolutions: {} })),
+    } as const;
+    expect(await send(batch)).toMatchObject({ kind: 'result', value: { custody: { suppliers: [
+      { filename: workbook.name, selectedSheet: 'Q4_Prices' }, { filename: workbook.name, selectedSheet: 'Q3_Prices' }, { filename: 'third.csv' },
+    ] } } });
+    const saved = await send({ type: 'saveRecipe', supplierId: 'primary', sheetIndex: 0, supplierLabel: 'Synthetic', selection: columns });
+    if (saved.kind !== 'result' || !saved.value || !('ok' in saved.value) || !saved.value.ok || !('bytes' in saved.value.value)) {
+      throw new Error('Expected saved supplier recipe. ' + JSON.stringify(saved));
+    }
+    const recipeFile = new File([saved.value.value.bytes], 'supplier-recipe.json');
+    const loaded = await send({ type: 'loadRecipe', file: recipeFile });
+    if (loaded.kind !== 'result' || !loaded.value || !('ok' in loaded.value) || !loaded.value.ok || !('version' in loaded.value.value)) {
+      throw new Error('Expected validated supplier recipe');
+    }
+    const recipe = loaded.value.value;
+    expect(recipe).toMatchObject({ version: 6, sheetName: 'Q4_Prices', selectedSheet: 'Q4_Prices' });
+    await send({ type: 'loadSupplier', file: workbook, supplierId: 'primary', firstVisibleSheet: true });
+    expect(await send({ type: 'applyRecipe', recipe, supplierId: 'primary', sheetIndex: 0 })).toMatchObject({ kind: 'result',
+      value: { ok: true, value: { sheetIndex: 0, supplier: { selectedSheet: 'Q4_Prices', sheets: [{ name: 'Q4_Prices' }] } } } });
+    expect(await send(update)).toMatchObject({ kind: 'error' });
+    expect(await send(batch)).toMatchObject({ kind: 'result', value: { custody: { suppliers: [
+      { selectedSheet: 'Q4_Prices' }, { selectedSheet: 'Q3_Prices' }, { filename: 'third.csv' },
+    ] } } });
   } finally {
     vi.unstubAllGlobals();
   }
-});
+}, 15_000);

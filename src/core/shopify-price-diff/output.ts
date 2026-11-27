@@ -241,10 +241,12 @@ export function createAudit(
     status, ...(baseline.platform ? { platform: baseline.platform } : {}), ...(baseline.market ? { market: baseline.market } : {}),
     columns, mapping, pricingRule: pricingRule ?? { mode: 'direct' }, verification, rollbackVerification,
     baseline: { name: baseline.name, headerRow: baseline.headerRow, headers: baseline.headers },
-    supplier: first ? { name: first.sheet.name, headerRow: first.sheet.headerRow, headers: first.sheet.headers } : null,
+    supplier: first ? { name: first.sheet.name, headerRow: first.sheet.headerRow, headers: first.sheet.headers,
+      ...(first.sheet.selectedSheet === undefined ? {} : { selectedSheet: first.sheet.selectedSheet }) } : null,
     ...(suppliers.length > 1 ? {
       suppliers: suppliers.map(({ supplierId, label, filename, sheet, mapping, pricingRule }) => ({
         supplierId, label, filename, worksheet: sheet.name, headers: sheet.headers, headerRow: sheet.headerRow, mapping,
+        ...(sheet.selectedSheet === undefined ? {} : { selectedSheet: sheet.selectedSheet }),
         pricingRule: pricingRule ?? { mode: 'direct' },
       })),
       overlapCount, conflictCount, conflictPolicy,

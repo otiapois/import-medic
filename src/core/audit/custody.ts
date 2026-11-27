@@ -1,5 +1,6 @@
 export interface SupplierFingerprint {
   filename: string;
+  selectedSheet?: string;
   sha256: string;
   bytes: number;
 }

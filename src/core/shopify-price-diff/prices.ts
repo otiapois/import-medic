@@ -40,7 +40,7 @@ export function readAmount(raw: string): Amount | null {
   return { ...decimal(matched[2].replace(',', '.')), currency };
 }
 
-function scaled(left: Decimal, right: Decimal): [bigint, bigint] {
+export function scaled(left: Decimal, right: Decimal): [bigint, bigint] {
   const digits = Math.max(left.scale, right.scale);
   return [left.units * 10n ** BigInt(digits - left.scale), right.units * 10n ** BigInt(digits - right.scale)];
 }

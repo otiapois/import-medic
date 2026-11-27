@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.3.0 (M13)
+
+- Choose a visible Excel worksheet in each supplier slot. Each workbook initially uses its first visible worksheet. An explicit selection can be saved by exact name in a v6 supplier recipe and recorded in the audit and Client Sign-Off HTML. Recipes v1–v5 remain loadable.
+- Compare previous and new supplier pricebooks in **Supplier Delta**. Map SKU and cost or price, review hikes, drops, additions and removals, and resolve invalid cells or duplicate SKUs before issuing a delta CSV or offline sign-off.
+- Download a Supplier Delta audit with SHA-256 fingerprints of the original inputs and available deliverables. The offline sign-off includes filterable top cost hikes and fingerprints for the inputs and CSV.
+
 ## v1.2.0 (M12)
 
 - Open **Sale Campaign Pack** in the price workbench and use one catalog CSV to preview a percentage or fixed-amount discount. Scope the campaign by SKU, review optional cost warnings, and resolve or skip any row whose final rounded price falls below the minimum retail floor.

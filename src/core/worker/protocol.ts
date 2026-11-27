@@ -28,7 +28,7 @@ export type DownloadFormat = 'price-csv' | 'price-rollback-csv' | 'price-audit-c
 interface SourceMeta { name: string; issues: DiffIssue[]; issueCount: number }
 export interface SheetMeta extends SourceMeta { headers: string[]; rowCount: number }
 export interface BaselineMeta extends SheetMeta { hasSku: boolean; markets?: ShopifyMarket[] }
-export interface SupplierMeta extends SourceMeta { sheets: SheetMeta[] }
+export interface SupplierMeta extends SourceMeta { sheets: SheetMeta[]; sheetNames?: string[]; selectedSheet?: string }
 
 export type DiffFilter = 'all' | 'updated' | 'flagged' | 'unmatched' | 'unchanged' | 'skipped' | 'margin-watchlist';
 export type PricePreviewRow = DiffRow & { variantOptions: string; grossMarginPercent?: string | null };
@@ -71,7 +71,7 @@ export interface SupplierBatchSetting extends DiffSettings { supplierId: string;
 
 interface Operations {
   loadBaseline: [{ file: File; platform?: StorePlatform }, BaselineMeta];
-  loadSupplier: [{ file: File; supplierId?: string }, SupplierMeta];
+  loadSupplier: [{ file: File; supplierId?: string; sheetName?: string; firstVisibleSheet?: true }, SupplierMeta];
   removeSupplier: [{ supplierId: string }, undefined];
   priceSettings: [SupplierWorksheet, ColumnSuggestions];
   priceFormulaPreview: [SupplierWorksheet & { selection: ColumnSelection; market?: string }, PricingPreview | null];
@@ -90,7 +90,7 @@ interface Operations {
   repairIssues: [PageRequest & { filter: RepairIssueFilter }, WorkerPage<RepairIssue>];
   download: [{ format: DownloadFormat }, WorkerDownload];
   loadRecipe: [{ file: File }, RecipeResult<SupplierRecipe>];
-  applyRecipe: [SupplierWorksheet & { recipe: SupplierRecipe }, RecipeResult<{ sheetIndex: number; selection: ColumnSelection }>];
+  applyRecipe: [SupplierWorksheet & { recipe: SupplierRecipe }, RecipeResult<{ sheetIndex: number; selection: ColumnSelection; supplier?: SupplierMeta }>];
   saveRecipe: [SupplierWorksheet & { supplierLabel: string; storeLabel?: string; selection: ColumnSelection }, RecipeResult<WorkerDownload>];
 }
 
@@ -100,7 +100,7 @@ export type ResultScope = 'price' | 'repair' | 'inspection';
 
 export function invalidatesResult(request: WorkerRequest): ResultScope | undefined {
   switch (request.type) {
-    case 'loadBaseline': case 'loadSupplier': case 'removeSupplier': case 'invalidatePrice': case 'diff': case 'diffBatch': return 'price';
+    case 'loadBaseline': case 'loadSupplier': case 'removeSupplier': case 'applyRecipe': case 'invalidatePrice': case 'diff': case 'diffBatch': return 'price';
     case 'loadRepair': case 'repair': return 'repair';
     case 'inspectImport': return 'inspection';
   }

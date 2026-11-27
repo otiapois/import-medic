@@ -5,10 +5,10 @@ import { issue } from './types';
 import { hasPricingInstructions, validatePricingRule } from './pricing-rules';
 import { compareAtHeader, inventoryHeader } from './source';
 
-const skuAliases = new Set(['sku', 'variant sku', 'supplier sku', 'product sku', 'item sku', 'sku code', 'stock keeping unit']);
+export const skuAliases = new Set(['sku', 'variant sku', 'supplier sku', 'product sku', 'item sku', 'sku code', 'stock keeping unit']);
 const handleAliases = new Set(['handle', 'url handle', 'product handle', 'shopify handle']);
 const costAliases = new Set(['cost', 'unit cost', 'wholesale cost', 'wholesale price']);
-const priceAliases = new Set(['price', 'new price', 'variant price', 'new variant price', 'supplier price', 'unit price', 'retail price', 'selling price', 'sale price', ...costAliases]);
+export const priceAliases = new Set(['price', 'new price', 'variant price', 'new variant price', 'supplier price', 'unit price', 'retail price', 'selling price', 'sale price', ...costAliases]);
 const compareAtAliases = new Set(['compare at price', 'variant compare at price', 'new compare at price', 'msrp', 'rrp']);
 
 export const defaultDropPercent = 50;

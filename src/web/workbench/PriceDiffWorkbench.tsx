@@ -21,15 +21,17 @@ import { STORE_PLATFORMS, withWorkspaceDefaults, WorkspaceProfileControls } from
 const PriceDiffReview = lazy(() => import('./PriceDiffReview').then(({ PriceDiffReview }) => ({ default: PriceDiffReview })));
 const VerifyImportPanel = lazy(() => import('./VerifyImportPanel'));
 const PromoCampaignPanel = lazy(() => import('./promo/PromoCampaignPanel'));
+const SupplierDeltaPanel = lazy(() => import('./supplier-delta/SupplierDeltaPanel'));
 
 const STUDIO_MODES = [
   { id: 'build', label: 'Build Update' },
   { id: 'verify', label: 'Verify Update / Rollback CSV' },
   { id: 'campaign', label: 'Sale Campaign Pack' },
+  { id: 'delta', label: 'Supplier Delta' },
 ] as const;
 
 type StudioMode = typeof STUDIO_MODES[number]['id'];
-type PairMode = Exclude<StudioMode, 'verify'>;
+type PairMode = 'build' | 'campaign';
 
 const FILE_FIELDS = {
   baseline: {
@@ -74,7 +76,8 @@ const DEMOS = {
 
 type FileSide = keyof typeof FILE_FIELDS;
 type LocalFile = { file: File; synthetic: boolean };
-type SupplierInput = { file?: LocalFile; recipeFile?: File; sheetChoice?: number; error?: string };
+type SupplierInput = { file?: LocalFile; recipeFile?: File; sheetChoice?: string; error?: string };
+type LoadedSupplier = { file: File; sheetName: string | undefined; firstVisibleSheet?: true; meta: SupplierMeta };
 
 export interface GeneratedPairSource {
   platform: StorePlatform;
@@ -131,12 +134,14 @@ interface PreparedFiles {
 const PRIMARY = 'primary';
 const EMPTY_RECIPE: RecipeLoad = { recipe: null, recipeErrors: [] };
 const sourceLabel = (filename: string) => filename.slice(0, 120);
+const worksheetNames = (supplier: SupplierMeta) => supplier.sheetNames ?? supplier.sheets.map(({ name }) => name);
 
 export function PriceDiffWorkbench({ characterKeys }: { characterKeys: boolean }) {
   const heading = useId();
   const [mode, setMode] = useState<StudioMode>('build');
   const [verifyVisited, setVerifyVisited] = useState(false);
   const [campaignVisited, setCampaignVisited] = useState(false);
+  const [deltaVisited, setDeltaVisited] = useState(false);
   const [pairMode, setPairMode] = useState<PairMode>('build');
   const [buildPair, setBuildPair] = useState<GeneratedPairSource | null>(null);
   const [campaignPair, setCampaignPair] = useState<GeneratedPairSource | null>(null);
@@ -155,7 +160,7 @@ export function PriceDiffWorkbench({ characterKeys }: { characterKeys: boolean }
   const [drafts, setDrafts] = useState<MappingDrafts>({});
   const nextSupplier = useRef(2);
   const [validWorker, setValidWorker] = useState(false);
-  const loaded = useRef<{ worker: WorkbenchWorker; baseline?: BaselineMeta; suppliers: Readonly<Record<string, SupplierMeta | undefined>> } | null>(null);
+  const loaded = useRef<{ worker: WorkbenchWorker; baseline?: BaselineMeta; suppliers: Map<string, LoadedSupplier> } | null>(null);
   const imported = useRef(new WeakMap<File, RecipeLoad>());
   const session = useWorkerSession();
   const { run, invalidate, reset, cancel, resume, paused, progress, error, finished } = session;
@@ -177,18 +182,12 @@ export function PriceDiffWorkbench({ characterKeys }: { characterKeys: boolean }
     if (paused || (!baselineFile && !entries.some(([, { file, recipeFile }]) => file || recipeFile))) return;
     void run(async ({ worker, progress: update, isCurrent }): Promise<PreparedFiles> => {
       if (loaded.current?.worker !== worker) {
-        const [baseline, suppliers] = await Promise.all([
-          baselineFile ? worker.request({ type: 'loadBaseline', file: baselineFile.file, platform }, update) : undefined,
-          Promise.all(entries.map(async ([supplierId, { file }]) => [
-            supplierId, file ? await worker.request({ type: 'loadSupplier', supplierId, file: file.file }, update) : undefined,
-          ] as const)),
-        ]);
+        const baseline = baselineFile ? await worker.request({ type: 'loadBaseline', file: baselineFile.file, platform }, update) : undefined;
         if (!isCurrent()) throw new Error('The price files changed.');
-        loaded.current = { worker, baseline, suppliers: Object.fromEntries(suppliers) };
+        loaded.current = { worker, baseline, suppliers: new Map() };
       }
       const { baseline, suppliers } = loaded.current;
-      const details = await Promise.all(entries.map(async ([supplierId, { sheetChoice, recipeFile }]): Promise<[string, PreparedSupplier]> => {
-        const supplier = suppliers[supplierId];
+      const details = await Promise.all(entries.map(async ([supplierId, { file, sheetChoice, recipeFile }]): Promise<[string, PreparedSupplier]> => {
         let recipeLoad = recipeFile ? imported.current.get(recipeFile) : undefined;
         if (recipeFile && !recipeLoad) {
           const response = await worker.request({ type: 'loadRecipe', file: recipeFile }, update);
@@ -199,17 +198,47 @@ export function PriceDiffWorkbench({ characterKeys }: { characterKeys: boolean }
         }
         const recipeDetails = recipeLoad ?? EMPTY_RECIPE;
         const { recipe, recipeErrors } = recipeDetails;
+        const recipeWorksheet = recipe?.version === 6 ? recipe.selectedSheet : undefined;
+        // Older recipes addressed the original indexed worksheet list.
+        const firstVisibleSheet = recipe && recipe.version !== 6 && recipe.sheetName !== null && sheetChoice === undefined ? undefined : true;
+        let supplier: SupplierMeta | undefined;
+        if (file) {
+          const cached = suppliers.get(supplierId);
+          const previous = cached?.file === file.file ? cached : undefined;
+          let requested = sheetChoice ?? (previous && recipeWorksheet && worksheetNames(previous.meta).includes(recipeWorksheet) ? recipeWorksheet : undefined);
+          if (previous && previous.sheetName === requested && previous.firstVisibleSheet === firstVisibleSheet) {
+            supplier = previous.meta;
+          } else {
+            suppliers.delete(supplierId);
+            if (!isCurrent()) throw new Error('The supplier worksheet changed.');
+            supplier = await worker.request({ type: 'loadSupplier', supplierId, file: file.file, sheetName: requested, firstVisibleSheet }, update);
+            if (!isCurrent()) throw new Error('The supplier worksheet changed.');
+            // A recipe can be loaded before the workbook. Discover the names before requesting its exact sheet.
+            if (requested === undefined && recipeWorksheet && worksheetNames(supplier).includes(recipeWorksheet)) {
+              requested = recipeWorksheet;
+              supplier = await worker.request({ type: 'loadSupplier', supplierId, file: file.file, sheetName: requested }, update);
+              if (!isCurrent()) throw new Error('The supplier worksheet changed.');
+            }
+            suppliers.set(supplierId, { file: file.file, sheetName: requested, firstVisibleSheet, meta: supplier });
+          }
+        }
         if (!baseline || !supplier?.sheets.length || supplier.issues.some(({ blocking }) => blocking)) {
           return [supplierId, { supplier, ...recipeDetails }];
         }
         const applied = recipe ? await worker.request({
           type: 'applyRecipe',
           supplierId,
-          sheetIndex: sheetChoice ?? 0,
-          recipe: sheetChoice === undefined ? recipe : { ...recipe, sheetName: null },
+          sheetIndex: 0,
+          recipe: sheetChoice === undefined ? recipe : recipe.version === 6
+            ? { ...recipe, sheetName: sheetChoice, selectedSheet: sheetChoice }
+            : { ...recipe, sheetName: null },
         }) : null;
         if (!isCurrent()) throw new Error('The supplier worksheet changed.');
-        const sheetIndex = applied?.ok ? applied.value.sheetIndex : sheetChoice ?? Math.max(0, supplier.sheets.findIndex(({ name }) => name === recipe?.sheetName));
+        if (applied?.ok && applied.value.supplier && file) {
+          supplier = applied.value.supplier;
+          suppliers.set(supplierId, { file: file.file, sheetName: supplier.selectedSheet, firstVisibleSheet, meta: supplier });
+        }
+        const sheetIndex = applied?.ok ? applied.value.sheetIndex : Math.max(0, supplier.sheets.findIndex(({ name }) => name === recipe?.sheetName));
         const diagnostics = applied && !applied.ok ? applied.diagnostics : [];
         const sheetMissing = diagnostics.some(({ field }) => field === 'sheetName');
         const recipeBlocked = diagnostics.some(({ code }) => code === 'unsafe-supplier-sheet' || code === 'unsupported-woo-recipe' || code === 'unsupported-bigcommerce-recipe');
@@ -242,7 +271,7 @@ export function PriceDiffWorkbench({ characterKeys }: { characterKeys: boolean }
     }, baselineFile || entries.some(([, { file }]) => file) ? 'reading' : 'parsing');
   }, [inputs, paused, platform, run]);
 
-  function clearPriceReport(reloadFiles: boolean) {
+  function clearPriceReport(reloadFiles: boolean, duringRead = false) {
     setBuildPair(null);
     if (reloadFiles) {
       reset();
@@ -253,13 +282,13 @@ export function PriceDiffWorkbench({ characterKeys }: { characterKeys: boolean }
     }
     // A label or order change is applied when the pending file read completes.
     // Invalidating the shared session during that read would discard its result.
-    if (!active || !validWorker) return;
+    if ((!active && !duringRead) || !validWorker) return;
     invalidate();
     void prepared?.worker.request({ type: 'invalidatePrice' }).catch(() => undefined);
   }
 
   function updateSupplier(id: string, change: Partial<SupplierInput>, reloadFile: boolean) {
-    clearPriceReport(reloadFile);
+    clearPriceReport(reloadFile, true);
     setDrafts(({ [id]: removed, ...remaining }) => remaining);
     setSupplierInputs((previous) => ({ ...previous, [id]: { ...previous[id], ...change } }));
   }
@@ -405,8 +434,9 @@ export function PriceDiffWorkbench({ characterKeys }: { characterKeys: boolean }
   function changeMode(next: StudioMode) {
     setMode(next);
     if (next === 'verify') setVerifyVisited(true);
-    else setPairMode(next);
+    if (next === 'build' || next === 'campaign') setPairMode(next);
     if (next === 'campaign') setCampaignVisited(true);
+    if (next === 'delta') setDeltaVisited(true);
   }
 
   function openCampaignVerification() {
@@ -417,6 +447,7 @@ export function PriceDiffWorkbench({ characterKeys }: { characterKeys: boolean }
   const pairSource = pairMode === 'campaign' ? campaignPair : buildPair;
   const workbenchLabel = {
     build: `${platformLabel} Safe Price Update workbench`, verify: 'Verify Before Import workbench', campaign: 'Sale Campaign Pack workbench',
+    delta: 'Supplier Delta workbench',
   }[mode];
 
   return (
@@ -474,24 +505,26 @@ export function PriceDiffWorkbench({ characterKeys }: { characterKeys: boolean }
                       ? prepared?.data.suppliers[supplierId]?.supplier : undefined;
                     const { supplier = previous, mapping, recipe, recipeErrors } = active?.suppliers[supplierId] ?? {};
                     const position = index + 1;
-                    const sheet = supplier?.sheets[mapping?.sheetIndex ?? sheetChoice ?? 0];
-                    const showWorksheet = supplier && (supplier.sheets.length > 1 || mapping?.sheetMissing || sheetChoice !== undefined);
+                    const names = supplier ? worksheetNames(supplier) : [];
+                    const selectedName = sheetChoice ?? supplier?.sheets[mapping?.sheetIndex ?? 0]?.name;
+                    const sheet = supplier?.sheets.find(({ name }) => name === selectedName);
+                    const worksheetLabel = multiple ? `Supplier worksheet ${position}` : 'Supplier worksheet';
+                    const worksheet = names.length > 1 || mapping?.sheetMissing || sheetChoice !== undefined ? (
+                      <label className="price-sheet">{worksheetLabel}
+                        <select aria-label={worksheetLabel} value={mapping?.sheetMissing ? '' : selectedName ?? ''} onChange={(event) => {
+                          updateSupplier(supplierId, { sheetChoice: event.currentTarget.value }, false);
+                        }}>
+                          {mapping?.sheetMissing ? <option value="" disabled>Choose replacement worksheet</option> : null}
+                          {names.map((name) => <option key={name} value={name}>{name}</option>)}
+                        </select>
+                      </label>
+                    ) : undefined;
                     return (
                       <li key={supplierId}>
                         <PriceFileInput side="supplier" field={FILE_FIELDS.supplier} position={multiple ? position : undefined} file={file}
                           message={{ reading: Boolean(progress && file && !active), error }}
                           onLoad={(choices) => load('supplier', choices, supplierId)}
-                          onClear={multiple ? undefined : () => clearSupplier(supplierId)}>
-                          {showWorksheet ? (
-                            <label className="price-sheet">{multiple ? `Supplier worksheet ${position}` : 'Supplier worksheet'}
-                              <select value={mapping?.sheetMissing ? '' : mapping?.sheetIndex ?? sheetChoice ?? 0} onChange={(event) => {
-                                updateSupplier(supplierId, { sheetChoice: Number(event.currentTarget.value) }, false);
-                              }}>
-                                {mapping?.sheetMissing ? <option value="" disabled>Choose replacement worksheet</option> : null}
-                                {supplier.sheets.map(({ name }, index) => <option key={index} value={index}>{name}</option>)}
-                              </select>
-                            </label>
-                          ) : null}
+                          onClear={multiple ? undefined : () => clearSupplier(supplierId)} worksheet={worksheet}>
                           {sheet ? (
                             <p className="price-source-count field-help">{sheet.rowCount.toLocaleString('en-US')} {sheet.rowCount === 1 ? 'row' : 'rows'} in selected sheet</p>
                           ) : null}
@@ -564,6 +597,14 @@ export function PriceDiffWorkbench({ characterKeys }: { characterKeys: boolean }
         {campaignVisited ? (
           <Suspense fallback={<p className="price-section" role="status">Opening Sale Campaign Pack…</p>}>
             <PromoCampaignPanel initialPlatform={platform} onPairAvailable={setCampaignPair} onVerify={openCampaignVerification} />
+          </Suspense>
+        ) : null}
+      </div>
+      <div id={`${heading}-delta-panel`} role="tabpanel" aria-labelledby={`${heading}-delta-tab`}
+        className="workbench-input price-studio-pane" hidden={mode !== 'delta'}>
+        {deltaVisited ? (
+          <Suspense fallback={<p className="price-section" role="status">Opening Supplier Delta…</p>}>
+            <SupplierDeltaPanel />
           </Suspense>
         ) : null}
       </div>

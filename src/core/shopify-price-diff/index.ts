@@ -18,7 +18,7 @@ import type { Amount } from './prices';
 import { addLine, compareAtHeader, duplicateIssues, inventoryHeader, optionValues, originalQuantity, variantKey } from './source';
 import { cellValue, conflictPolicies, issue } from './types';
 import type { Baseline, BatchDiffOptions, ColumnSelection, DiffIssue, DiffRow, PriceDiffResult, PricingPreview, RollbackVerification, RowResolution, SourceCell, SourceRow, SupplierContender, SupplierDiffInput, SupplierSheet, Variant, Verification } from './types';
-import { isScientific } from './xlsx';
+import { isScientific } from '../xlsx';
 
 export { parseBaseline, parseSupplier } from './source';
 export { suggestColumns } from './mapping';
@@ -68,12 +68,20 @@ function supplierIdentities(
 ): { identities: SupplierIdentity[]; issues: DiffIssue[] } {
   const skuRows = new Map<string, number[]>();
   const optionsRows = new Map<string, number[]>();
+  const mapped = new Set([mapping.sku, mapping.handle, ...mapping.options, mapping.price, mapping.compareAt, mapping.inventory]);
   const identities = supplier.rows.map((row): SupplierIdentity => {
     const details = (index: number | null) => ({ row: row.line, column: index === null ? null : supplier.headers[index], value: cellValue(row, index) });
     const sku = cellValue(row, mapping.sku);
     const handle = cellValue(row, mapping.handle);
     const options = optionValues.map((_, index) => cellValue(row, mapping.options[index]) ?? '');
     const issues: DiffIssue[] = [];
+    for (const index of mapped) {
+      const cell = index == null ? undefined : row.cells[index];
+      if (cell?.kind === 'formula' && !cell.value) {
+        issues.push(issue('supplier', 'formula-without-cached-value', 'This mapped Excel formula has no cached value. Replace it with its original value before continuing.',
+          { ...details(index), blocking: false }));
+      }
+    }
     const skipped = resolutions[row.line]?.skip === true;
     if (sku !== null && sku.trim() !== '' && mapping.sku !== null) {
       const cell = row.cells[mapping.sku];

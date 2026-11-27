@@ -6,6 +6,8 @@ ImportMedic compares a Shopify, WooCommerce, or legacy BigCommerce product expor
 
 **Sale Campaign Pack** prepares a discount and its matched revert from one product export. It previews the final sale prices against a required minimum retail floor and packages the pair with a JSON audit and offline Campaign Sign-Off report.
 
+**Supplier Delta** compares a previous supplier pricebook with a new one. Review cost hikes, drops, added and removed SKUs before preparing a store update. Its CSV and offline sign-off are review reports for the two supplier files.
+
 ## Run locally
 
 Use Node.js 24 and its bundled npm.
@@ -16,7 +18,7 @@ npm run build
 npm run preview -- --port 4173 --strictPort
 ```
 
-Open the price update workbench and choose **Load Synthetic Agency Demo** for a Shopify direct-price example. To compare your own files, choose the platform and select a fresh product export and a supplier CSV or XLSX. Use **+ Add another supplier sheet** for a second or third file. Both browser workbenches process files in a local Web Worker with progress and **Cancel**. [Local price update workbench](http://127.0.0.1:4173/shopify-price-update-diff)
+Open the price update workbench and choose **Load Synthetic Agency Demo** for a Shopify direct-price example. To compare your own files, choose the platform and select a fresh product export and a supplier CSV or XLSX. Use **+ Add another supplier sheet** for a second or third file. **Build Update** and single-file repair run in local Web Workers with progress and **Cancel**. [Local price update workbench](http://127.0.0.1:4173/shopify-price-update-diff)
 
 ### Verify an update or rollback before import
 
@@ -46,7 +48,14 @@ Schedule and import the files manually in the store's admin. Confirm the current
 
 ImportMedic re-parses both downloads and replays the update followed by its matched rollback against the uploaded snapshot in the browser. For a Shopify admin import, check the destination store, current titles, handles, option names and values, prices, and any included quantities against the relevant snapshot. Pause if anything has changed. Use the rollback only for its matched update after checking for later catalog edits and stock movement. The Shopify import and overwrite confirmation are manual steps.
 
-Store XLSX SKUs as text, including leading zeros. Numeric and scientific-notation SKU cells, formulas in mapped key, price or quantity cells, and duplicate keys within a sheet require review.
+Each XLSX supplier slot starts with the workbook's first visible worksheet. If there are multiple visible tabs, open **Supplier worksheet** beside that supplier's filename and select the intended tab. Check the new headers and suggested mapping before confirming. An explicit selection binds that slot to the exact worksheet name independently of the other slots. Store XLSX SKUs as text to preserve leading zeros. Numeric and scientific-notation SKU cells, formulas in mapped key, price or quantity cells, and duplicate keys within a sheet require review. ImportMedic warns about formulas with missing cached values and never evaluates workbook formulas.
+
+### Compare two supplier pricebooks
+
+1. Open **Supplier Delta** in the price workbench. Add the previous and new CSV or XLSX pricebooks, or choose **Load Synthetic Supplier Delta Demo**. For multi-tab Excel files, set **Previous worksheet** and **New worksheet** as needed.
+2. Check each SKU and cost or price mapping. Map inventory on either side if needed. Compare amounts in the same currency. Review the signed changes and use **Cost Hikes**, **Cost Drops**, **Added**, **Removed**, and **Blocked** to inspect matching rows and source lines.
+3. If duplicate SKUs or invalid mapped cells hold the CSV and sign-off, inspect the issue rows and download the JSON audit for review. Correct the files or mapping and compare again.
+4. Keep **Supplier Delta CSV**, **JSON Audit**, and **Delta Sign-Off (.html)** with the original pricebooks. The HTML shows the top hikes and includes filters that work offline. Its footer records the source and CSV SHA-256 digests. The JSON audit records those digests and the SHA-256 of the actual downloaded HTML bytes. An XLSX input digest covers the whole original workbook. [Supplier Delta contract](docs/subsystems/supplier-delta.md)
 
 ### Update prices for one Shopify market
 
@@ -86,7 +95,7 @@ When any supplier has stock mapped, both native CSVs include **Variant Inventory
 
 ### Reuse a supplier mapping
 
-Once the columns are confirmed, enter a supplier label and select **Save Supplier Recipe (.json)**. A recipe holds the supplier's column names, selected XLSX sheet name, price thresholds, and formula guard setting. Version 5 adds tiered pricing. Version 4 can save the stock mapping and drop threshold or supplier conflict policy. Version 3 holds manual FX or automatic compare-at settings, version 2 holds other pricing adjustments or a store label, and version 1 supports default direct pricing. All five versions load.
+Once the columns are confirmed, enter a supplier label and select **Save Supplier Recipe (.json)**. A recipe holds the supplier's column names, price thresholds, and formula guard setting. Explicitly choosing a worksheet saves its exact name in a v6 recipe. Versions 1–5 still load. They support direct pricing, other pricing adjustments, manual FX or automatic compare-at, optional inventory or supplier conflict settings, and tiered pricing according to their version.
 
 For the next batch, choose fresh files, select **Load Supplier Recipe (.json)** for the supplier, and verify the mapped fields before selecting **Confirm columns**. Remap any missing header or worksheet. Verify or replace a carried FX rate and confirm it again. Confirm a carried preference or store currency when prompted. Row overrides, skips, and confirmations apply to one batch.
 
@@ -106,7 +115,7 @@ Use **Download Bookkeeper Sign-Off (.html)** to open or print the standalone rep
 
 ### Verify file fingerprints
 
-Use **SHA-256 file fingerprints** in the price workbench to compare the baseline, supplier files, and available update and rollback CSVs with the JSON audit or Client Sign-Off HTML. The single-file repair shows the source and available repaired CSV fingerprints with the same values in its JSON audit and Bookkeeper Sign-Off HTML. Hash the original files and the downloads before resaving them in a spreadsheet editor. A digest match verifies that the file bytes match the recorded fingerprint. Keep the audit or report with the files it references.
+Use **SHA-256 file fingerprints** in the price workbench to compare the baseline, supplier files, and available update and rollback CSVs with the JSON audit or Client Sign-Off HTML. An explicit XLSX worksheet selection is recorded alongside the original whole-workbook fingerprint. The single-file repair shows the source and available repaired CSV fingerprints with the same values in its JSON audit and Bookkeeper Sign-Off HTML. Hash the original files and the downloads before resaving them in a spreadsheet editor. A digest match verifies that the file bytes match the recorded fingerprint. Keep the audit or report with the files it references.
 
 ## Verify local processing
 
@@ -160,7 +169,7 @@ GitHub CI installs the locked dependencies and runs type checking, unit tests, s
 
 For Cloudflare Pages, build into `dist/` with `SITE_URL` set to the approved HTTPS origin. The build default `https://importmedic.example` is for local use. [`LAUNCH_ROUTES`](src/web/seo/routes.ts) lists the two initial indexable URLs, `/` and `/shopify-price-update-diff`. The other 11 pages remain directly accessible with `noindex,follow`.
 
-To prepare a source snapshot from a Git checkout, use `npm run export:public -- <targetDir>` with a new or empty destination. The exporter verifies committed `HEAD` files, including production source with names such as `local-settings.ts`. Its public path allowlist keeps research, internal tasks, logs, and scratch material out of the snapshot. Run `npm run typecheck` from the exported directory with the release dependencies. Release changes are listed in the [changelog](CHANGELOG.md).
+To prepare a source snapshot from a Git checkout, use `npm run export:public -- <targetDir>` with a new or empty destination. The exporter verifies committed `HEAD` files, including production source with names such as `local-settings.ts`. Its public path allowlist keeps research, internal tasks, logs, and scratch material out of the snapshot. Keep the exclusion tokens `local`, `draft`, `scratch`, `temp`, `tmp`, `backup`, `cache`, `research`, `internal`, `private`, `secret`, and `secrets` out of new public fixture filenames. Run `npm run typecheck` from the exported directory with the release dependencies. Release changes are listed in the [changelog](CHANGELOG.md).
 
 ## License
 

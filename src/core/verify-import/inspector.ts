@@ -13,7 +13,7 @@ import {
 } from '../shopify-price-diff/source';
 import { cellValue } from '../shopify-price-diff/types';
 import type { Baseline, DiffIssue, SourceRow, StorePlatform, Variant } from '../shopify-price-diff/types';
-import { isScientific } from '../shopify-price-diff/xlsx';
+import { isScientific } from '../xlsx';
 import {
   canonicalWooImportHeader, parseWooCommerceBaseline, readWooStock, wooIdentityHeaders,
   wooRegularHeader, wooSaleHeader, wooStockHeader, wooWritable,

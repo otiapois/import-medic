@@ -1,7 +1,7 @@
 import type { Baseline, DiffIssue, Variant } from '../shopify-price-diff/types';
 import { addLine, baselinePrice, duplicateIssues, readCsvTable, type CsvReadOptions } from '../shopify-price-diff/source';
 import { cellValue, issue } from '../shopify-price-diff/types';
-import { isScientific } from '../shopify-price-diff/xlsx';
+import { isScientific } from '../xlsx';
 
 export const wooRegularHeader = 'Regular price';
 export const wooSaleHeader = 'Sale price';

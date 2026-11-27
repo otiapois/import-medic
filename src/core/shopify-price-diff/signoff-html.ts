@@ -184,7 +184,8 @@ ${rows.length ? `<table><caption>Updated and flagged rows</caption><thead><tr>
 </tr></thead><tbody>${rows.join('\n')}</tbody></table>` : '<p>There are no updated or flagged rows to show.</p>'}
 ${custody ? custodyFooter([
     ['Baseline CSV', custody.baselineSha256],
-    ...custody.suppliers.map(({ filename, bytes, sha256 }) => [`Supplier ${filename} (${bytes} bytes)`, sha256] as const),
+    ...custody.suppliers.map(({ filename, bytes, sha256, selectedSheet }) =>
+      [`Supplier ${filename} (${bytes} bytes)${selectedSheet === undefined ? '' : ` · Worksheet: ${selectedSheet}`}`, sha256] as const),
     ['Update CSV', custody.updateCsvSha256],
     ['Rollback CSV', custody.rollbackCsvSha256],
   ]) : ''}

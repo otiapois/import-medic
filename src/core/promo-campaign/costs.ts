@@ -2,7 +2,7 @@ import { currencyColumns, explicitlyWholesale, mappingLabel } from '../shopify-p
 import { baselinePrice, readAmount } from '../shopify-price-diff/prices';
 import { parseSupplier } from '../shopify-price-diff/source';
 import type { Baseline, SourceCell, Variant } from '../shopify-price-diff/types';
-import { isScientific } from '../shopify-price-diff/xlsx';
+import { isScientific } from '../xlsx';
 import type { PromoCampaignIssue, PromoCampaignRow } from './types';
 
 const costAliases = (header: string) => explicitlyWholesale(header) || ['cost per item', 'cost price'].includes(mappingLabel(header));

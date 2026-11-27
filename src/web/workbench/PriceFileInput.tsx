@@ -1,7 +1,7 @@
 import { useId, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 
-export function PriceFileInput({ side, field, position, file, message, onLoad, onClear, clearLabel, children }: {
+export function PriceFileInput({ side, field, position, file, message, onLoad, onClear, clearLabel, worksheet, children }: {
   side: string;
   field: { title: string; formats: string; label: string; accept: string };
   position?: number;
@@ -10,6 +10,7 @@ export function PriceFileInput({ side, field, position, file, message, onLoad, o
   onLoad: (files: FileList) => void;
   onClear?: () => void;
   clearLabel?: string;
+  worksheet?: ReactNode;
   children?: ReactNode;
 }) {
   const id = useId();
@@ -58,9 +59,12 @@ export function PriceFileInput({ side, field, position, file, message, onLoad, o
         </div>
       </div>
       {file ? (
-        <div className="price-file-name">
-          <p><span className="sr-only">Selected file: </span><strong>{file.file.name}</strong>{file.synthetic ? <small>Synthetic file</small> : null}</p>
-          {onClear ? <button className="text-button" type="button" onClick={() => { onClear(); input.current?.focus(); }}>{clearLabel ?? `Clear ${side} file`}</button> : null}
+        <div className="price-file-selection">
+          <div className="price-file-name">
+            <p><span className="sr-only">Selected file: </span><strong>{file.file.name}</strong>{file.synthetic ? <small>Synthetic file</small> : null}</p>
+            {onClear ? <button className="text-button" type="button" onClick={() => { onClear(); input.current?.focus(); }}>{clearLabel ?? `Clear ${side} file`}</button> : null}
+          </div>
+          {worksheet}
         </div>
       ) : null}
       <p className={message.reading ? 'file-message' : 'sr-only'} role="status">{message.reading ? 'Reading file…' : file ? `${field.title} selected.` : ''}</p>

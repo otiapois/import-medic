@@ -1,9 +1,9 @@
 import { unzipSync } from 'fflate';
 import { XMLParser, XMLValidator } from 'fast-xml-parser';
-import type { SourceCell, SourceRow } from './types';
+import type { SourceCell, SourceRow } from '../shopify-price-diff/types';
 
 interface Relationship { '@_Id'?: string; '@_Type'?: string; '@_Target'?: string; '@_TargetMode'?: string }
-interface WorkbookSheet { '@_name'?: string; '@_id'?: string }
+interface WorkbookSheet { '@_name'?: string; '@_id'?: string; '@_state'?: string }
 type TextNode = string | { '#text'?: string };
 interface XmlString { t?: TextNode; r?: { t?: TextNode }[] }
 interface XmlCell { '@_r'?: string; '@_t'?: string; '@_s'?: string; v?: string; is?: XmlString; f?: TextNode }
@@ -132,7 +132,7 @@ function formatCodes(styles: XmlDocument['styleSheet']): string[] {
   });
 }
 
-export function readWorkbook(bytes: Uint8Array): { name: string; rows: SourceRow[] }[] {
+export function openWorkbook(bytes: Uint8Array) {
   const entries = unzipWorkbook(bytes);
   const xml = new Map<string, string>();
   for (const [part, data] of Object.entries(entries)) {
@@ -171,55 +171,72 @@ export function readWorkbook(bytes: Uint8Array): { name: string; rows: SourceRow
     if (matches.length > 1) invalid();
     return matches[0] ? readXml(partTarget(workbookPart, matches[0].target)) : undefined;
   };
-  const strings = part('sharedStrings')?.sst?.si?.map(spreadsheetText) ?? [];
-  const formats = formatCodes(part('styles')?.styleSheet);
-  const sheetNames = new Set<string>();
+  const knownNames = new Set<string>();
   const sheetPaths = new Set<string>();
-  const result: { name: string; rows: SourceRow[] }[] = [];
-  let cellCount = 0;
-  for (const sheet of sheets) {
-    const { '@_name': name, '@_id': id } = sheet;
+  const worksheets: { name: string; path: string; visible: boolean }[] = [];
+  for (const { '@_name': name, '@_id': id, '@_state': state } of sheets) {
     const link = id && workbookLinks.get(id);
-    if (!name || !link || sheetNames.has(name.toLowerCase())) return invalid();
-    sheetNames.add(name.toLowerCase());
+    if (!name || !link || knownNames.has(name.toLowerCase())) return invalid();
+    if (state !== undefined && state !== 'visible' && state !== 'hidden' && state !== 'veryHidden') return invalid();
+    knownNames.add(name.toLowerCase());
     if (link.type === 'chartsheet') continue;
     if (link.type !== 'worksheet') return invalid();
     const path = partTarget(workbookPart, link.target);
-    if (sheetPaths.has(path)) invalid();
+    if (sheetPaths.has(path) || !xml.has(path)) return invalid();
     sheetPaths.add(path);
-    const worksheet = readXml(path).worksheet;
-    if (worksheet === undefined) return invalid();
-
-    const rows: SourceRow[] = [];
-    let previousLine = 0;
-    for (const xmlRow of worksheet.sheetData?.row ?? []) {
-      const firstAddress = xmlRow.c?.[0]?.['@_r'];
-      const rowNumber = xmlRow['@_r'] ?? (firstAddress && /^[A-Z]+([0-9]+)$/.exec(firstAddress)?.[1]);
-      const line = rowNumber ? Number(rowNumber) : previousLine + 1;
-      if ((rowNumber && !/^[1-9]\d*$/.test(rowNumber)) || !Number.isSafeInteger(line) || line <= previousLine || line > maxRows) invalid();
-      previousLine = line;
-      const cells: SourceCell[] = [];
-      for (const cell of xmlRow.c ?? []) {
-        cellCount++;
-        if (cellCount > maxCells) invalid();
-        const ref = cell['@_r'];
-        const address = ref === undefined ? undefined : /^([A-Z]{1,3})([1-9]\d*)$/.exec(ref);
-        if (ref !== undefined && (!address || Number(address[2]) !== line)) invalid();
-        let column = cells.length;
-        if (address) {
-          column = 0;
-          for (const character of address[1]) column = column * 26 + character.charCodeAt(0) - 64;
-          column--;
-        }
-        if (column >= maxColumns || cells[column]) invalid();
-        cells[column] = workbookCell(cell, strings, formats);
-      }
-      while (cells.length && cells.at(-1)?.kind === 'missing') cells.pop();
-      if (cells.some((cell) => cell.kind === 'formula' || cell.kind === 'unsupported' || (cell.value !== null && cell.value !== ''))) {
-        rows.push({ line, cells });
-      }
-    }
-    result.push({ name, rows });
+    worksheets.push({ name, path, visible: state === undefined || state === 'visible' });
   }
-  return result.length ? result : invalid();
+  const sheetNames = worksheets.filter(({ visible }) => visible).map(({ name }) => name);
+  return { sheetNames, readSheets };
+
+  function readSheets(selectedName?: string) {
+    const selected = selectedName === undefined ? worksheets :
+      worksheets.filter(({ name, visible }) => visible && name === selectedName);
+    if (selectedName === undefined && selected.length === 0) return invalid();
+    if (!selected.length) return [];
+    const strings = part('sharedStrings')?.sst?.si?.map(spreadsheetText) ?? [];
+    const formats = formatCodes(part('styles')?.styleSheet);
+    let cellCount = 0;
+    const sheets = selected.map(({ name, path }) => {
+      const worksheet = readXml(path).worksheet;
+      if (worksheet === undefined) return invalid();
+
+      const rows: SourceRow[] = [];
+      let previousLine = 0;
+      for (const xmlRow of worksheet.sheetData?.row ?? []) {
+        const firstAddress = xmlRow.c?.[0]?.['@_r'];
+        const rowNumber = xmlRow['@_r'] ?? (firstAddress && /^[A-Z]+([0-9]+)$/.exec(firstAddress)?.[1]);
+        const line = rowNumber ? Number(rowNumber) : previousLine + 1;
+        if ((rowNumber && !/^[1-9]\d*$/.test(rowNumber)) || !Number.isSafeInteger(line) || line <= previousLine || line > maxRows) invalid();
+        previousLine = line;
+        const cells: SourceCell[] = [];
+        let hasData = false;
+        for (const cell of xmlRow.c ?? []) {
+          cellCount++;
+          if (cellCount > maxCells) invalid();
+          const ref = cell['@_r'];
+          const address = ref === undefined ? undefined : /^([A-Z]{1,3})([1-9]\d*)$/.exec(ref);
+          if (ref !== undefined && (!address || Number(address[2]) !== line)) invalid();
+          let column = cells.length;
+          if (address) {
+            column = 0;
+            for (const character of address[1]) column = column * 26 + character.charCodeAt(0) - 64;
+            column--;
+          }
+          if (column >= maxColumns || cells[column]) invalid();
+          const source = workbookCell(cell, strings, formats);
+          cells[column] = source;
+          if (source.kind === 'formula' || source.kind === 'unsupported' || (source.value !== null && source.value !== '')) hasData = true;
+        }
+        while (cells.length && cells.at(-1)?.kind === 'missing') cells.pop();
+        if (hasData) rows.push({ line, cells });
+      }
+      return { name, rows };
+    });
+    return sheets;
+  }
+}
+
+export function listWorkbookSheets(bytes: Uint8Array): string[] {
+  return openWorkbook(bytes).sheetNames;
 }

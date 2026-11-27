@@ -75,11 +75,13 @@ export interface Variant {
   bigcommerce?: BigCommerceIdentity;
 }
 
-export type SupplierSheet = SourceTable;
+export type SupplierSheet = SourceTable & { selectedSheet?: string };
 
 export interface SupplierFile {
   name: string;
   sheets: SupplierSheet[];
+  selectedSheet?: string;
+  sheetNames?: string[];
   issues: DiffIssue[];
 }
 

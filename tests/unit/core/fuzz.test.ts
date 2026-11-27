@@ -19,6 +19,8 @@ import type { SupplierRecipe } from '../../../src/core/shopify-price-diff/recipe
 import { createWorkspaceProfile, parseWorkspaceProfile, serializeWorkspaceProfile } from '../../../src/core/shopify-price-diff/workspace-profile';
 import { parseWooCommerceBaseline } from '../../../src/core/woocommerce-price-diff';
 import { inspectImport } from '../../../src/core/verify-import/inspector';
+import { buildSupplierDelta } from '../../../src/core/supplier-delta/engine';
+import { listWorkbookSheets } from '../../../src/core/xlsx';
 
 
 const fuzzExecutions = { accepted: 0, discarded: 0, properties: 0 };
@@ -1175,7 +1177,123 @@ it.each(['shopify', 'woocommerce', 'bigcommerce'] as const)('replays 1,020 %s pr
   ), { seed: seed + (shop ? 23 : woo ? 24 : 25), numRuns: 1020 });
 }, 60_000);
 
-it('accounts for all 15,100 seeded executions without skips', () => {
-  expect(fuzzExecutions).toEqual({ accepted: 15_100, discarded: 0, properties: 26 });
+it('replays 2,000 workbook selections with exact worksheet names, leading zeros and sparse lines', () => {
+  const book = readFileSync(new URL('../../../fixtures/supplier-delta/synthetic-pricebook.xlsx', import.meta.url));
+  const entries = unzipSync(book);
+  const metaPath = 'xl/workbook.xml';
+  const previousPath = 'xl/worksheets/sheet3.xml';
+  const currentPath = 'xl/worksheets/sheet2.xml';
+  const metadata = strFromU8(entries[metaPath]);
+  const previous = strFromU8(entries[previousPath]);
+  const current = strFromU8(entries[currentPath]);
+  checkFuzz(fc.property(
+    fc.integer({ min: 0, max: 999_999 }),
+    fc.integer({ min: 11, max: 1_048_576 }),
+    fc.record({ swapped: fc.boolean(), malformedOther: fc.boolean(), hideFirst: fc.boolean(), paddedName: fc.boolean() }),
+    (suffix, line, variation) => {
+      const exactName = variation.paddedName ? ' Q4 Prices ' : 'Q4 Prices';
+      const exactSku = '00' + suffix + '-BLK';
+      let sheetList = metadata.replace('Q4_Prices', exactName);
+      if (variation.swapped) sheetList = sheetList.replace(/(<sheet name=" Q4 Prices "|<sheet name="Q4 Prices")([^>]+>)(<sheet name="Q3_Prices"[^>]+>)/,
+        (_, start: string, end: string, earlier: string) => earlier + start + end);
+      if (variation.hideFirst) sheetList = sheetList.replace('name="Instructions"', 'name="Instructions" state="hidden"');
+      const bytes = zipSync({ ...entries, [metaPath]: strToU8(sheetList),
+        [currentPath]: strToU8(current.replace('00123', exactSku).replace(/(r="[A-C]?)10"/g, (_, start: string) => start + line + '"')),
+        [previousPath]: strToU8(variation.malformedOther ? '<worksheet>' : previous),
+      }, { mtime: new Date(2026, 0, 1) });
+      expect(listWorkbookSheets(bytes)).toEqual([...(variation.hideFirst ? [] : ['Instructions']),
+        ...(variation.swapped ? ['Q3_Prices', exactName] : [exactName, 'Q3_Prices'])]);
+      const selected = parseSupplier(bytes, 'book.xlsx', { sheetName: exactName });
+      expect(selected.issues).toEqual([]);
+      expect(selected.sheets[0].rows[0].cells[0]).toMatchObject({ value: exactSku, kind: 'text' });
+      expect(selected.sheets[0].rows[3].line).toBe(line);
+      expect(parseSupplier(bytes, 'book.xlsx', { sheetName: exactName.toLowerCase() }).issues[0].code).toBe('missing-worksheet');
+    },
+  ), { seed: seed + 26, numRuns: 2_000 });
+}, 60_000);
+
+it('replays 1,800 exact Supplier Delta cases with added, removed and blocked physical lines', async () => {
+  const fromMills = (units: bigint): string => (units / 1000n).toString() + '.' + (units % 1000n).toString().padStart(3, '0');
+  const source = (rows: string[][], filename: string) => ({ bytes: csvBytes(['SKU', 'Cost', 'Inventory', 'Description'], rows), filename });
+  await checkAsyncFuzz(fc.asyncProperty(
+    fc.bigInt({ min: 0n, max: 999_999_999_999_999_999n }),
+    fc.bigInt({ min: 0n, max: 999_999_999_999_999_999n }),
+    fc.integer({ min: 0, max: 999_999 }),
+    fc.constantFrom('ready', 'duplicate-previous', 'duplicate-next', 'invalid-cost', 'same', 'zero'),
+    async (first, second, suffix, mode) => {
+      const sku = '00' + suffix;
+      const oldMills = mode === 'zero' ? 0n : first;
+      const newMills = mode === 'same' ? oldMills : second;
+      const before = [sku, fromMills(oldMills), '50', 'quoted,\r\nphysical'];
+      const after = [sku, mode === 'invalid-cost' ? '1e4' : fromMills(newMills), '51', 'quoted,\r\nphysical'];
+      const previous = source([before, ['REMOVED-' + suffix, '1.000', '10', ''], ...(mode === 'duplicate-previous' ? [before] : [])], 'previous.csv');
+      const next = source([after, ['ADDED-' + suffix, '0.000', '0', ''], ...(mode === 'duplicate-next' ? [after] : [])], 'next.csv');
+      const report = await buildSupplierDelta(previous, next);
+      expect(report.counts['added-sku']).toBe(1);
+      expect(report.counts['removed-sku']).toBe(1);
+      expect(report.rows[0].sku).toBe(sku);
+      if (mode === 'duplicate-previous' || mode === 'duplicate-next' || mode === 'invalid-cost') {
+        expect(report).toMatchObject({ status: 'blocked', deltaCsv: null, signOffHtml: null });
+        expect(report.issues).toContainEqual(expect.objectContaining(mode === 'invalid-cost'
+          ? { code: 'blocked-invalid-cost', side: 'next', rows: [2] }
+          : { code: 'blocked-duplicate-sku', side: mode === 'duplicate-previous' ? 'previous' : 'next', rows: [2, 5] }));
+        expect(Object.keys(report.custody)).toEqual(['previousSha256', 'newSha256']);
+        return;
+      }
+      expect(report.status).toBe('ready');
+      const difference = newMills - oldMills;
+      const row = report.rows[0];
+      expect(row.inventoryDelta).toBe('1');
+      expect(row.status).toBe(difference === 0n ? 'unchanged' : difference > 0n ? 'cost-increased' : 'cost-decreased');
+      const magnitude = difference < 0n ? -difference : difference;
+      const fraction = (magnitude % 1000n).toString().padStart(3, '0').replace(/0$/, '');
+      const sign = difference < 0n ? '-' : difference > 0n ? '+' : '';
+      expect(row.delta).toBe(sign + (magnitude / 1000n).toString() + '.' + fraction);
+      const rounded = oldMills === 0n ? null : (magnitude * 10_000n + oldMills / 2n) / oldMills;
+      expect(row.deltaPercent).toBe(rounded === null ? newMills === 0n ? '0.00' : null :
+        sign + (rounded / 100n).toString() + '.' + (rounded % 100n).toString().padStart(2, '0'));
+      const csv = parseCsv(report.deltaCsv!);
+      expect(csv.records.map((record) => record.cells[0])).toEqual(['SKU', sku, 'REMOVED-' + suffix, 'ADDED-' + suffix]);
+      expect(report.custody.deltaCsvSha256).toBe(createHash('sha256').update(report.deltaCsv!).digest('hex'));
+      expect(report.custody.signOffHtmlSha256).toBe(createHash('sha256').update(report.signOffHtml!).digest('hex'));
+    },
+  ), { seed: seed + 27, numRuns: 1_800 });
+}, 60_000);
+
+it('replays 1,200 version 1–6 recipe cases across exact worksheet mappings', () => {
+  const workbook = readFileSync(new URL('../../../fixtures/supplier-delta/synthetic-pricebook.xlsx', import.meta.url));
+  const selected = parseSupplier(workbook, 'book.xlsx', { sheetName: 'Q4_Prices' });
+  const headers = selected.sheets[0].headers;
+  checkFuzz(fc.property(
+    fc.integer({ min: 1, max: 6 }),
+    fc.integer({ min: 1, max: 999_999 }),
+    fc.integer({ min: 0, max: 100 }),
+    (version, label, threshold) => {
+      const fx = { sourceCurrency: 'USD', storeCurrency: 'CAD', fxRate: '1.25' };
+      let pricingRule: PricingRule | undefined;
+      if (version === 2) pricingRule = { mode: 'multiplier', multiplier: '2' };
+      if (version === 3 || version === 4) pricingRule = { mode: 'direct', fx };
+      if (version === 5 || version === 6) pricingRule = {
+        mode: 'tiered-brackets', fx, brackets: [{ mode: 'multiplier', multiplier: '3', upTo: '33.5' },
+          { mode: 'multiplier', multiplier: '2', upTo: null }],
+      };
+      const created = createSupplierRecipe('Synthetic ' + label, headers, {
+        confirmed: true, joinKey: 'sku', skuColumn: 0, priceColumn: 1, pricingRule, dropThresholdPercent: threshold,
+        ...(version >= 4 ? { inventoryColumn: 2, inventoryDropThresholdPercent: threshold } : {}),
+      }, 'Q4_Prices', undefined, version === 6 ? { selectedSheet: 'Q4_Prices' } : undefined);
+      if (!created.ok) throw new Error(JSON.stringify(created));
+      expect(created.value.version).toBe(version);
+      const read = parseSupplierRecipe(bytes(serializeSupplierRecipe(created.value)));
+      expect(read).toEqual(created);
+      expect(applySupplierRecipe(created.value, selected, 0)).toMatchObject({ ok: true, value: { sheetIndex: 0, selection: {
+        confirmed: false, skuColumn: 0, priceColumn: 1, dropThresholdPercent: threshold,
+        ...(version >= 4 ? { inventoryColumn: 2 } : {}),
+      } } });
+    },
+  ), { seed: seed + 28, numRuns: 1_200 });
+}, 60_000);
+
+it('accounts for all 20,100 seeded executions without skips', () => {
+  expect(fuzzExecutions).toEqual({ accepted: 20_100, discarded: 0, properties: 29 });
   console.info(`Deterministic fuzz: ${fuzzExecutions.accepted} accepted, ${fuzzExecutions.discarded} discarded across ${fuzzExecutions.properties} properties.`);
 });

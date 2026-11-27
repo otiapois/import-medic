@@ -1,0 +1,5 @@
+Handle,Title,Option1 Name,Option1 Value,Variant SKU,Variant Price
+synthetic-one,Synthetic One,Title,Default Title,00123,25.00
+synthetic-two,Synthetic Two,Title,Default Title,0045-BLK,12.20
+synthetic-kept,Synthetic Kept,Title,Default Title,KEPT,1.005
+synthetic-new,Synthetic New,Title,Default Title,NEW-ONLY,6.00

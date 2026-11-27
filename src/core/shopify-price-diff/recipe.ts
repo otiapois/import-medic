@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { defaultDropPercent, defaultIncreasePercent } from './mapping';
-import { hasPricingInstructions, legacyPricingRuleSchema, preTierPricingRuleSchema, tieredPricingRuleSchema, validatePricingRule } from './pricing-rules';
+import { hasPricingInstructions, legacyPricingRuleSchema, preTierPricingRuleSchema, pricingRuleSchema, tieredPricingRuleSchema, validatePricingRule } from './pricing-rules';
 import { hasDuplicateKeys, profileText, thresholds } from './settings-validation';
 import { conflictPolicies } from './types';
 import type { ColumnSelection, SupplierFile } from './types';
@@ -31,6 +31,8 @@ const recipeSchema = z.discriminatedUnion('version', [
   z.strictObject({ version: z.literal(3), ...recipeFields, ...modernPricing }),
   z.strictObject({ version: z.literal(4), ...recipeFields, ...modernPricing, ...batchSettings }),
   z.strictObject({ version: z.literal(5), ...recipeFields, ...modernPricing, ...batchSettings, pricingRule: tieredPricingRuleSchema }),
+  z.strictObject({ version: z.literal(6), ...recipeFields, ...modernPricing, ...batchSettings, pricingRule: pricingRuleSchema,
+    sheetName: profileText(128), selectedSheet: profileText(128) }),
 ]);
 
 export type SupplierRecipe = z.infer<typeof recipeSchema>;
@@ -47,8 +49,8 @@ const headerKey = (header: string) => header.trim().toLowerCase();
 
 function validateRecipe(input: unknown): RecipeResult<SupplierRecipe> {
   if (typeof input === 'object' && input !== null && 'version' in input &&
-    input.version !== 1 && input.version !== 3 && input.version !== 4 && input.version !== 5 && (input.version !== 2 || !('pricingRule' in input))) {
-    return failure('unsupported-version', 'Use an ImportMedic supplier recipe with version 1, 2, 3, 4, or 5 and its required fields.');
+    input.version !== 1 && input.version !== 3 && input.version !== 4 && input.version !== 5 && input.version !== 6 && (input.version !== 2 || !('pricingRule' in input))) {
+    return failure('unsupported-version', 'Use an ImportMedic supplier recipe with version 1, 2, 3, 4, 5, or 6 and its required fields.');
   }
   const parsed = recipeSchema.safeParse(input);
   if (!parsed.success) {
@@ -58,7 +60,10 @@ function validateRecipe(input: unknown): RecipeResult<SupplierRecipe> {
     }) };
   }
   const recipe = parsed.data;
-  if (recipe.version === 3 || recipe.version === 4 || recipe.version === 5) {
+  if (recipe.version === 6 && recipe.sheetName !== recipe.selectedSheet) {
+    return failure('invalid-recipe-schema', 'The selected worksheet must match the exact worksheet name saved in the recipe.');
+  }
+  if (recipe.version === 3 || recipe.version === 4 || recipe.version === 5 || recipe.version === 6) {
     const { fx, compareAtRule } = recipe.pricingRule;
     if (recipe.version === 3 && !fx && !compareAtRule) return failure('invalid-recipe-schema', 'Version 3 requires FX conversion or an automatic compare-at rule.');
     if ((recipe.fxRateNeedsRecheck === true) !== (fx !== undefined)) {
@@ -69,10 +74,10 @@ function validateRecipe(input: unknown): RecipeResult<SupplierRecipe> {
     }
   }
   const join = recipe.joinKey;
-  if ((recipe.version === 4 || recipe.version === 5) && recipe.inventoryDropThresholdPercent !== undefined && recipe.inventoryColumn === undefined) {
+  if ((recipe.version === 4 || recipe.version === 5 || recipe.version === 6) && recipe.inventoryDropThresholdPercent !== undefined && recipe.inventoryColumn === undefined) {
     return failure('invalid-recipe-schema', 'An inventory drop threshold requires a mapped inventory column.');
   }
-  const names = [recipe.priceColumn, recipe.compareAtColumn, ...((recipe.version === 4 || recipe.version === 5) && recipe.inventoryColumn ? [recipe.inventoryColumn] : []), ...(join.type === 'sku' ? [join.skuColumn] : [join.handleColumn, ...join.optionColumns])];
+  const names = [recipe.priceColumn, recipe.compareAtColumn, ...((recipe.version === 4 || recipe.version === 5 || recipe.version === 6) && recipe.inventoryColumn ? [recipe.inventoryColumn] : []), ...(join.type === 'sku' ? [join.skuColumn] : [join.handleColumn, ...join.optionColumns])];
   const selected = names.filter((name) => name !== null).map(headerKey);
   if (new Set(selected).size !== selected.length) return failure('duplicate-recipe-column', 'A source column can serve only one recipe field. Choose distinct columns.');
   return { ok: true, value: recipe };
@@ -94,6 +99,7 @@ export function parseSupplierRecipe(bytes: Uint8Array): RecipeResult<SupplierRec
 
 export function createSupplierRecipe(
   supplierLabel: string, headers: readonly string[], selection: ColumnSelection, sheetName: string | null, storeLabel?: string,
+  options?: { selectedSheet: string },
 ): RecipeResult<SupplierRecipe> {
   if (!selection.confirmed) return failure('unconfirmed-mapping', 'Confirm all supplier columns before saving a recipe.');
   const rule = selection.pricingRule;
@@ -106,8 +112,8 @@ export function createSupplierRecipe(
   const inventory = selected(selection.inventoryColumn);
   if (selection.inventoryColumn != null && inventory === undefined) return failure('invalid-inventory-column', 'Choose an available inventory quantity column before saving the recipe.');
   const useBatchSettings = rule?.mode === 'tiered-brackets' || selection.inventoryColumn != null || selection.conflictPolicy !== undefined;
-  const pricingFields = useBatchSettings
-    ? { version: rule?.mode === 'tiered-brackets' ? 5 : 4, pricingRule: rule ?? { mode: 'direct' }, ...store, ...(fx ? { fxRateNeedsRecheck: true } : {}),
+  const pricingFields = useBatchSettings || options
+    ? { ...(options ? { version: 6, selectedSheet: options.selectedSheet } : { version: rule?.mode === 'tiered-brackets' ? 5 : 4 }), pricingRule: rule ?? { mode: 'direct' }, ...store, ...(fx ? { fxRateNeedsRecheck: true } : {}),
       ...(inventory === undefined ? {} : { inventoryColumn: inventory }),
       ...(inventory !== undefined && selection.inventoryDropThresholdPercent !== undefined ? { inventoryDropThresholdPercent: selection.inventoryDropThresholdPercent } : {}),
       ...(selection.conflictPolicy === undefined ? {} : { conflictPolicy: selection.conflictPolicy }) }
@@ -139,7 +145,9 @@ export function applySupplierRecipe(
   if (recipe.sheetName !== null) {
     const name = recipe.sheetName;
     const sheets = /\.xlsx$/i.test(supplier.name) ? supplier.sheets : [];
-    const matches = sheets.filter((sheet) => headerKey(sheet.name) === headerKey(name));
+    const matches = sheets.filter((sheet) => recipe.version === 6
+      ? sheet.name === recipe.selectedSheet && (supplier.sheetNames?.includes(sheet.name) ?? true)
+      : headerKey(sheet.name) === headerKey(name));
     if (matches.length !== 1 || matches[0].name !== name) {
       const code = matches.length > 1 ? 'recipe-ambiguous-sheet' : 'recipe-missing-sheet';
       const message = matches.length > 1 ? `The workbook has ambiguous matches for worksheet “${name}”.` : `This recipe requires the exact XLSX worksheet “${name}”.`;
@@ -172,8 +180,8 @@ export function applySupplierRecipe(
     dropThresholdPercent: recipe.dropThresholdPercent, increaseThresholdPercent: recipe.increaseThresholdPercent,
     formulaGuard: recipe.formulaGuard, confirmed: false, sameCurrencyConfirmed: false,
     ...(recipe.version !== 1 ? { pricingRule: recipe.pricingRule } : {}),
-    ...(recipe.version === 3 || (recipe.version === 4 || recipe.version === 5) && recipe.pricingRule.fx ? { fxRateConfirmed: false } : {}),
-    ...((recipe.version === 4 || recipe.version === 5) ? {
+    ...(recipe.version === 3 || (recipe.version === 4 || recipe.version === 5 || recipe.version === 6) && recipe.pricingRule.fx ? { fxRateConfirmed: false } : {}),
+    ...((recipe.version === 4 || recipe.version === 5 || recipe.version === 6) ? {
       inventoryColumn: recipe.inventoryColumn === undefined ? null : match('inventoryColumn', recipe.inventoryColumn),
       inventoryDropThresholdPercent: recipe.inventoryDropThresholdPercent,
       conflictPolicy: recipe.conflictPolicy,

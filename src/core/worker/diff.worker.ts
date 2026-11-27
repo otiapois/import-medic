@@ -16,7 +16,7 @@ import type { RepairOptions, RepairResult } from '../types';
 import { inspectImport, type ImportInspection } from '../verify-import/inspector';
 import { suggestPlatforms } from './platform-suggestion';
 import { invalidatesResult, resultScope, supersededResult } from './protocol';
-import type { DiffFilter, DiffSummary, DownloadFormat, InspectionSummary, PlatformSuggestion, RepairSummary, SheetMeta, WorkerDownload, WorkerMessage, WorkerPage, WorkerProgress, WorkerReply, WorkerRequest, WorkerResult } from './protocol';
+import type { DiffFilter, DiffSummary, DownloadFormat, InspectionSummary, PlatformSuggestion, RepairSummary, SheetMeta, SupplierMeta, WorkerDownload, WorkerMessage, WorkerPage, WorkerProgress, WorkerReply, WorkerRequest, WorkerResult } from './protocol';
 import { guardSummary, indexRepairViews, repairAudit, repairAuditText } from './repair-views';
 
 const scope = globalThis as unknown as {
@@ -36,7 +36,7 @@ const allStatuses: Record<DiffRow['status'], Exclude<DiffFilter, 'all'>> = {
 };
 
 let baseline: (Baseline & { sha256: string }) | undefined;
-const suppliers = new Map<string, SupplierFile & { fingerprint: SupplierFingerprint }>();
+const suppliers = new Map<string, SupplierFile & { workbookBytes?: Uint8Array; fingerprint: SupplierFingerprint }>();
 const defaultSupplierId = 'primary';
 let price: Awaited<ReturnType<typeof indexPriceResult>> | undefined;
 let inspection: ImportInspection | undefined;
@@ -65,6 +65,21 @@ function issuesMeta(issues: DiffIssue[]) {
 
 function sheetMeta({ name, headers, issues, rows }: SourceTable): SheetMeta {
   return { name, headers, rowCount: rows.length, ...issuesMeta(issues) };
+}
+
+function supplierMeta({ name, issues, sheets, sheetNames, selectedSheet }: SupplierFile): SupplierMeta {
+  return { name, ...issuesMeta(issues), sheets: sheets.map(sheetMeta),
+    ...(sheetNames ? { sheetNames } : {}), ...(selectedSheet === undefined ? {} : { selectedSheet }) };
+}
+
+function parseWorkbookSelection(bytes: Uint8Array, filename: string, sheetName?: string, firstVisibleSheet?: true): SupplierFile {
+  return parseSupplier(bytes, filename, sheetName !== undefined ? { sheetName } :
+    firstVisibleSheet && /\.xlsx$/i.test(filename) ? { firstVisibleSheet } : undefined);
+}
+
+function selectedFingerprint(fingerprint: SupplierFingerprint, selection: SupplierFile): SupplierFingerprint {
+  return { filename: fingerprint.filename, bytes: fingerprint.bytes, sha256: fingerprint.sha256,
+    ...(selection.selectedSheet === undefined ? {} : { selectedSheet: selection.selectedSheet }) };
 }
 
 function pageOf<T>(items: readonly T[], page: number, pageSize: number): WorkerPage<T> {
@@ -196,11 +211,11 @@ async function run(request: WorkerRequest, progress: Progress, ensureCurrent: ()
         const sku = baseline.platform === 'bigcommerce' ? bigCommerceSkuHeader(baseline) : baseline.platform === 'woocommerce' ? 'SKU' : 'Variant SKU';
         return { ...sheetMeta(baseline), hasSku: baseline.columns.has(sku), ...(baseline.markets ? { markets: baseline.markets } : {}) };
       }
-      const supplier = parseSupplier(bytes, request.file.name);
-      suppliers.set(request.supplierId ?? defaultSupplierId, { ...supplier,
-        fingerprint: { filename: request.file.name, bytes: bytes.byteLength, sha256: digest } });
+      const supplier = parseWorkbookSelection(bytes, request.file.name, request.sheetName, request.firstVisibleSheet);
+      suppliers.set(request.supplierId ?? defaultSupplierId, { ...supplier, ...(supplier.sheetNames ? { sheetNames: supplier.sheetNames, workbookBytes: bytes } : {}),
+        fingerprint: selectedFingerprint({ filename: request.file.name, bytes: bytes.byteLength, sha256: digest }, supplier) });
       progress('parsing', 100);
-      return { name: supplier.name, ...issuesMeta(supplier.issues), sheets: supplier.sheets.map(sheetMeta) };
+      return supplierMeta(supplier);
     }
     case 'removeSupplier':
       suppliers.delete(request.supplierId);
@@ -362,17 +377,37 @@ async function run(request: WorkerRequest, progress: Progress, ensureCurrent: ()
       if (request.file.size > MAX_RECIPE_BYTES) return { ok: false, diagnostics: [{ code: 'recipe-too-large', message: 'Choose an ImportMedic recipe smaller than 64 KB.' }] };
       return parseSupplierRecipe(new Uint8Array(await request.file.arrayBuffer()));
     }
-    case 'applyRecipe':
+    case 'applyRecipe': {
+      price = undefined;
       if ((baseline?.platform === 'woocommerce' || baseline?.platform === 'bigcommerce') && (request.recipe.joinKey.type !== 'sku' || ('pricingRule' in request.recipe &&
         'compareAtRule' in request.recipe.pricingRule && request.recipe.pricingRule.compareAtRule !== undefined))) {
         return { ok: false, diagnostics: [{ code: baseline.platform === 'bigcommerce' ? 'unsupported-bigcommerce-recipe' : 'unsupported-woo-recipe',
           message: 'Choose a SKU recipe without an automatic compare-at rule for ' + pricePlatformName() + '.' }] };
       }
-      return applySupplierRecipe(request.recipe, requireLoaded(suppliers.get(request.supplierId ?? defaultSupplierId), 'Choose a supplier file before applying a recipe.'), request.sheetIndex);
+      const supplierId = request.supplierId ?? defaultSupplierId;
+      const input = requireLoaded(suppliers.get(supplierId), 'Choose a supplier file before applying a recipe.');
+      const { recipe, sheetIndex } = request;
+      const name = recipe.sheetName;
+      const explicit = recipe.version === 6;
+      if (name === null || !input.workbookBytes || !input.sheetNames?.includes(name) ||
+        (explicit ? input.selectedSheet === name : input.sheets.some((sheet) => sheet.name === name))) {
+        return applySupplierRecipe(recipe, input, sheetIndex);
+      }
+      const selected = parseWorkbookSelection(input.workbookBytes, input.name, name);
+      if (!explicit) {
+        delete selected.selectedSheet;
+        for (const sheet of selected.sheets) delete sheet.selectedSheet;
+      }
+      const applied = applySupplierRecipe(recipe, selected, 0);
+      if (!applied.ok) return applied;
+      suppliers.set(supplierId, { ...selected, workbookBytes: input.workbookBytes, fingerprint: selectedFingerprint(input.fingerprint, selected) });
+      return { ok: true, value: { ...applied.value, supplier: supplierMeta(selected) } };
+    }
     case 'saveRecipe': {
       const input = requireLoaded(suppliers.get(request.supplierId ?? defaultSupplierId), 'Choose a supplier file before saving a recipe.');
       const sheet = requireLoaded(input.sheets[request.sheetIndex], 'Choose an available supplier worksheet before saving a recipe.');
-      const recipe = createSupplierRecipe(request.supplierLabel, sheet.headers, request.selection, /\.xlsx$/i.test(input.name) ? sheet.name : null, request.storeLabel);
+      const recipe = createSupplierRecipe(request.supplierLabel, sheet.headers, request.selection, /\.xlsx$/i.test(input.name) ? sheet.name : null, request.storeLabel,
+        input.selectedSheet === undefined ? undefined : { selectedSheet: input.selectedSheet });
       if (!recipe.ok) return recipe;
       const validated = applySupplierRecipe(recipe.value, input, request.sheetIndex);
       if (!validated.ok) return validated;

@@ -5,7 +5,7 @@ import { detectShopifyMarkets } from './markets';
 import { baselinePrice } from './prices';
 import { cellValue, issue } from './types';
 import type { Baseline, DiffIssue, SourceRow, SourceTable, SupplierFile, Variant } from './types';
-import { isScientific, readWorkbook } from './xlsx';
+import { isScientific, openWorkbook } from '../xlsx';
 
 export const optionNames = ['Option1 Name', 'Option2 Name', 'Option3 Name'];
 export const optionValues = ['Option1 Value', 'Option2 Value', 'Option3 Value'];
@@ -79,26 +79,44 @@ export function readCsvTable(bytes: Uint8Array, name: string, kind: 'baseline' |
   return table;
 }
 
-export function parseSupplier(bytes: Uint8Array, name: string): SupplierFile {
-  if (/\.csv$/i.test(name)) return { name, sheets: [readCsvTable(bytes, name, 'supplier')], issues: [] };
+export function parseSupplier(bytes: Uint8Array, name: string, options?: { sheetName: string } | { firstVisibleSheet: true }): SupplierFile {
+  if (/\.csv$/i.test(name) && options === undefined) return { name, sheets: [readCsvTable(bytes, name, 'supplier')], issues: [] };
   if (!/\.xlsx$/i.test(name)) {
     return { name, sheets: [], issues: [issue('supplier', 'unsupported-file', 'Choose a supplier CSV or XLSX file.')] };
   }
+  let sheetNames: string[] | undefined;
   try {
-    const sheets = readWorkbook(bytes).map(({ name: sheet, rows }) => {
+    const workbook = openWorkbook(bytes);
+    sheetNames = workbook.sheetNames;
+    const explicit = options !== undefined && 'sheetName' in options;
+    const selected = explicit ? options.sheetName : options ? sheetNames[0] ?? '' : undefined;
+    const worksheets = workbook.readSheets(selected);
+    if (options && worksheets.length === 0) {
+      return { name, sheetNames, sheets: [], issues: [issue('supplier', 'missing-worksheet', 'Choose the exact name of a visible worksheet in this workbook.')] };
+    }
+    const sheets = worksheets.map(({ name: sheet, rows }) => {
       const table = readTable(sheet, rows, 'supplier');
       for (const row of table.rows) {
-        if (row.cells.slice(table.headers.length).some((cell) => cell.kind === 'formula' || cell.value !== null && cell.value !== '')) {
+        if (row.cells.length > table.headers.length &&
+          Object.keys(row.cells).some((key) => {
+            const index = Number(key);
+            const cell = row.cells[index];
+            return index >= table.headers.length && (cell.kind === 'formula' || cell.value !== null && cell.value !== '');
+          })) {
           table.issues.push(issue('supplier', 'row-width', 'This worksheet row includes data outside the header columns.', { row: row.line }));
         }
       }
-      return table;
+      return explicit ? { ...table, selectedSheet: sheet } : table;
     });
-    return { name, sheets, issues: [] };
+    const supplier: SupplierFile = { name, sheets, issues: [], ...(options ? { sheetNames } : {}),
+      ...(explicit ? { selectedSheet: options.sheetName } : {}) };
+    // Keep the legacy enumerable receipt, including when replaying older recipes.
+    if (!options) Object.defineProperty(supplier, 'sheetNames', { value: sheetNames });
+    return supplier;
   } catch (error) {
     const external = error instanceof Error && error.message === 'external-xlsx-relationship';
     return {
-      name, sheets: [],
+      name, sheets: [], ...(options && sheetNames ? { sheetNames } : {}),
       issues: [external ?
         issue('supplier', 'external-xlsx-relationship', 'This workbook contains an external OOXML relationship. Save a local values-only copy.') :
         issue('supplier', 'invalid-xlsx', 'This XLSX archive is malformed, unsafe, unsupported, or exceeds the workbook limits.')],

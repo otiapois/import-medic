@@ -1,6 +1,6 @@
 import { addLine, duplicateIssues, readCsvTable, type CsvReadOptions } from '../shopify-price-diff/source';
 import { cellValue, issue, type Baseline, type Variant } from '../shopify-price-diff/types';
-import { isScientific } from '../shopify-price-diff/xlsx';
+import { isScientific } from '../xlsx';
 
 export const bigTypeHeader = 'Item Type';
 export const bigIdHeader = 'Product ID';
