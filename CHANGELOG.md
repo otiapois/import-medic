@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.9.0 (M19)
+
+- Open **Inventory Sync** in Price Update Studio to compare a Shopify **All states** inventory CSV with one to three supplier stock sheets. Select an exact location and apply a safety reserve, a low-stock zero-out threshold, and an optional cap.
+- Preview on-hand changes and withheld units. Review conflicting quantities, invalid values, and large drops before downloading a location-scoped update and matched rollback. Both files carry the expected current quantity for Shopify's import validation. The JSON audit and offline Inventory Sign-Off record the local comparison and file fingerprints.
+- Run the same inventory comparison locally with `repair-cli --mode inventory-sync`. A held run returns exit `2` and retains the diagnostic files and custody manifest while withholding both native CSVs.
+
 ## v1.8.0 (M18)
 
 - Run local repair, price comparison, candidate verification, sale campaigns, supplier deltas, and catalog migration with `repair-cli --mode` from the source checkout. Use `--out-dir` for the batch's available CSVs, JSON audits or verification reports, and offline sign-offs.

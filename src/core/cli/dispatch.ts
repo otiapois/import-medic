@@ -1,5 +1,6 @@
 import { PLATFORM_IDS, repairCsvWithBytes, type RepairOptions } from '..';
 import { sha256, type PriceCustody, type RepairCustody } from '../audit/custody';
+import { buildInventorySync, inspectInventorySupplier, type InventorySupplierSource, type InventorySyncOptions } from '../inventory-sync/engine';
 import { parseBigCommerceBaseline } from '../bigcommerce-price-diff';
 import { parseBom } from '../bom/rollup';
 import { buildCatalogMigration } from '../catalog-migrator/engine';
@@ -16,7 +17,7 @@ import { parseWooCommerceBaseline } from '../woocommerce-price-diff';
 import { repairAudit } from '../worker/repair-views';
 import { runPriceComparison } from '../whatif/simulator';
 
-export const cliModes = ['repair', 'price-diff', 'verify', 'promo', 'supplier-delta', 'migrate'] as const;
+export const cliModes = ['repair', 'price-diff', 'verify', 'promo', 'supplier-delta', 'migrate', 'inventory-sync'] as const;
 export const storePlatforms = ['shopify', 'woocommerce', 'bigcommerce'] as const satisfies readonly StorePlatform[];
 export type CliMode = typeof cliModes[number];
 export interface CliFile { filename: string; bytes: Uint8Array }
@@ -35,10 +36,14 @@ export interface PriceSupplier {
   resolutions?: Readonly<Record<number, RowResolution>>;
 }
 
-type DeltaColumn = { header: string } | { index: number };
+type CliColumn = { header: string } | { index: number };
 export interface DeltaSource extends CliFile {
   sheetName?: string;
-  columns?: { skuColumn?: DeltaColumn; costColumn?: DeltaColumn; inventoryColumn?: DeltaColumn | null };
+  columns?: { skuColumn?: CliColumn; costColumn?: CliColumn; inventoryColumn?: CliColumn | null };
+}
+
+export interface CliInventorySupplier extends Omit<InventorySupplierSource, 'mapping'> {
+  columns: { skuColumn?: CliColumn; quantityColumn?: CliColumn };
 }
 
 type PriceRequest = { mode: 'price-diff'; platform: StorePlatform; baseline: CliFile; suppliers: PriceSupplier[];
@@ -50,6 +55,7 @@ export type CliRequest =
   | { mode: 'verify'; platform: StorePlatform; baseline: CliFile; candidate: CliFile; matchedUpdate?: CliFile }
   | { mode: 'promo'; platform: StorePlatform; baseline: CliFile; costSheet?: CliFile; options: Omit<PromoCampaignOptions, 'costSheet'> }
   | { mode: 'supplier-delta'; previous: DeltaSource; next: DeltaSource }
+  | { mode: 'inventory-sync'; baseline: CliFile; suppliers: CliInventorySupplier[]; options: InventorySyncOptions }
   | { mode: 'migrate'; source: CliFile; sourcePlatform: StorePlatform; targetPlatform: StorePlatform };
 
 const utf8 = new TextEncoder();
@@ -220,6 +226,25 @@ export async function dispatchCli(request: CliRequest): Promise<CliResult> {
         : result('blocked', report);
     }
     case 'supplier-delta': return supplierDelta(request.previous, request.next);
+    case 'inventory-sync': {
+      const suppliers = request.suppliers.map(({ columns, ...source }): InventorySupplierSource => {
+        const { skuColumn, quantityColumn } = columns;
+        if (skuColumn === undefined || quantityColumn === undefined) return source;
+        if ('index' in skuColumn && 'index' in quantityColumn) {
+          return { ...source, mapping: { skuColumn: skuColumn.index, quantityColumn: quantityColumn.index } };
+        }
+        const { headers } = inspectInventorySupplier(source);
+        const indexOf = (selection: CliColumn) => {
+          if ('index' in selection) return selection.index;
+          const first = headers.indexOf(selection.header);
+          return first === headers.lastIndexOf(selection.header) ? first : -1;
+        };
+        return { ...source, mapping: { skuColumn: indexOf(skuColumn), quantityColumn: indexOf(quantityColumn) } };
+      });
+      const { status, updateCsv, rollbackCsv, auditJson, signOffHtml } = await buildInventorySync(request.baseline, suppliers, request.options);
+      return result(status, artifact('audit', 'inventory-audit.json', auditJson), artifact('sign-off', 'inventory-sign-off.html', signOffHtml),
+        ...(updateCsv && rollbackCsv ? [artifact('update', 'inventory-update.csv', updateCsv), artifact('rollback', 'inventory-rollback.csv', rollbackCsv)] : []));
+    }
     case 'migrate': {
       const { sourcePlatform, targetPlatform, source } = request;
       const { artifacts: { targetCsv, auditJson, signOffHtml } } = await buildCatalogMigration(sourcePlatform, targetPlatform, source.bytes, source.filename);

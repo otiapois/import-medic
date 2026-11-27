@@ -16,6 +16,7 @@ import { createCustodyManifest, dispatchCli, type CliResult } from '../../../src
 import { isSafeFileName, isSafeLocalPath } from '../../../src/core/cli/paths';
 import { decodeCsv, parseCsv, serializeCsv } from '../../../src/core/csv';
 import { guardSpreadsheetCell } from '../../../src/core/formula-guard';
+import { buildInventorySync } from '../../../src/core/inventory-sync/engine';
 import { buildPromoCampaign, type PromoCampaignOptions } from '../../../src/core/promo-campaign/engine';
 import { createBookkeeperSignoffHtml } from '../../../src/core/repair/bookkeeper-signoff';
 import { escapeReportText, offlineReportCsp } from '../../../src/core/report-html';
@@ -1927,7 +1928,108 @@ describe('M18 CLI engine parity and custody', () => {
   });
 });
 
-it('accounts for all 32,720 seeded executions without skips', () => {
-  expect(fuzzExecutions).toEqual({ accepted: 32_720, discarded: 0, properties: 58 });
+describe('M19 Shopify stock conservation and safety boundaries', () => {
+  const mapping = { skuColumn: 0, quantityColumn: 1 };
+  const file = (filename: string, value: string) => ({ filename, bytes: bytes(value) });
+  const baselineHeaders = ['Handle', 'Title', 'Option 1 Value', 'SKU', 'Location', 'Available', 'On hand (new)', 'On hand (current)'];
+  const whole = fc.nat({ max: 20_000 });
+  const costed = (sku: string, stock: string) => ({ filename: 'offer.csv', bytes: csvBytes(['SKU', 'Qty'], [[sku, stock]]), mapping });
+  const reserve = { reserveUnits: 0, zeroOutThreshold: 0 };
+
+  it('replays 1,200 selected-location pairs and conserves original raw rows, padding and independent location bytes', async () => {
+    await checkAsyncFuzz(fc.asyncProperty(
+      fc.integer({ min: -20_000, max: 20_000 }), whole, whole, whole, fc.option(whole, { nil: undefined }),
+      fc.nat({ max: 900_000 }), fc.constantFrom('\r\n', '\r', '\n'), fc.constantFrom('é漢', 'رمل', '"Quoted, title"'),
+      async (original, supplier, reserveUnits, zeroOutThreshold, maxCap, suffix, ending, text) => {
+        const sku = '00' + suffix;
+        const current = (original < 0 ? '-' : '') + '00' + Math.abs(original);
+        const other = '00' + (suffix + 1);
+        const onHand = Math.min(maxCap ?? Number.MAX_SAFE_INTEGER,
+          supplier > zeroOutThreshold ? Math.max(0, supplier - reserveUnits) : 0);
+        const header = baselineHeaders.join(',');
+        const unique = [text, 'first\nsecond', 'third\r\nfourth'];
+        const sourceRows = [['Warehouse A', current], ['Warehouse B', other], ['Warehouse C', 'Not stocked']] as const;
+        const rawRows = sourceRows.map(([location, rawValue], i) => {
+          const withQty = serializeCsv(baselineHeaders, [['part', unique[i], 'Special, "Sand"', sku,
+            location, String(suffix + i), String(suffix + i + 100), rawValue]], 'shopify-products').slice(header.length + 1);
+          return { location, raw: withQty, stock: rawValue };
+        });
+        const baseline = file('store.csv', [header, ...rawRows.map(({ raw }) => raw)].join(ending));
+        const result = await buildInventorySync(baseline, [costed(sku, String(supplier))],
+          { targetLocation: 'Warehouse A', reserveUnits, zeroOutThreshold, maxCap, approveLargeDrop: true });
+        expect(result.issues).toEqual([]);
+        expect(result.rows).toMatchObject([{ sku, currentRaw: current, currentQty: original, proposedQty: onHand, bufferWithheld: supplier - onHand }]);
+        if (onHand === original) {
+          expect(result).toMatchObject({ status: 'no-changes', updateCsv: null, rollbackCsv: null });
+          return;
+        }
+        const replay = (native: Uint8Array) => {
+          const [head, ...rows] = parseCsv(decodeCsv(native).text).records;
+          expect(rows).toHaveLength(1);
+          expect(head.cells).toEqual(['Handle', 'Title', 'Option 1 Value', 'SKU', 'Location', 'On hand (current)', 'On hand (new)']);
+          for (const { cells } of rows) {
+            const [handle, title, option, key, location, expected, desired] = cells;
+            expect([handle, title, option, key, location]).toEqual(['part', text, 'Special, "Sand"', sku, 'Warehouse A']);
+            const state = rawRows.find(row => row.location === location)!;
+            expect(state.stock).toBe(expected);
+            state.raw = state.raw.slice(0, -state.stock.length) + desired;
+            state.stock = desired;
+          }
+        };
+        const preserved = rawRows.slice(1).map(({ raw }) => bytes(raw));
+        replay(result.updateCsv!);
+        expect(rawRows[0].stock).toBe(String(onHand));
+        expect(rawRows.slice(1).map(({ raw }) => bytes(raw))).toEqual(preserved);
+        replay(result.rollbackCsv!);
+        expect(bytes([header, ...rawRows.map(({ raw }) => raw)].join(ending))).toEqual(baseline.bytes);
+        expect(result.verification).toEqual({ checked: true, restoredRows: 1, otherLocationRowsUntouched: 2 });
+      },
+    ), { seed: seed + 58, numRuns: 1200 });
+  }, 30_000);
+
+  it('agrees with an exact rational 80% oracle on 750 whole-number proposals up to the safe integer boundary', async () => {
+    await checkAsyncFuzz(fc.asyncProperty(
+      fc.bigInt({ min: 1n, max: BigInt(Number.MAX_SAFE_INTEGER) }), fc.integer({ min: -3, max: 3 }), fc.boolean(),
+      async (original, offset, approved) => {
+        const projected = original / 5n + BigInt(offset);
+        const after = projected < 0n ? 0n : projected;
+        const requiresApproval = (original - after) * 100n > original * 80n;
+        const sku = '00001';
+        const baseline = { filename: 'shop.csv', bytes: csvBytes(baselineHeaders,
+          [['part', 'Original', 'Default Title', sku, 'Shelf', '0', '923', String(original)]]) };
+        const result = await buildInventorySync(baseline, [costed(sku, String(after))], { ...reserve, approveLargeDrop: approved });
+        expect(result.status).toBe(requiresApproval && !approved ? 'blocked' : after === original ? 'no-changes' : 'ready');
+        expect(result.issues.map(issue => issue.code)).toEqual(requiresApproval && !approved ? ['large-stock-drop'] : []);
+        if (result.status === 'ready') {
+          expect(parseCsv(decodeCsv(result.updateCsv!).text).records[1].cells.slice(-2)).toEqual([String(original), String(after)]);
+          expect(parseCsv(decodeCsv(result.rollbackCsv!).text).records[1].cells.slice(-2)).toEqual([String(after), String(original)]);
+        } else expect([result.updateCsv, result.rollbackCsv]).toEqual([null, null]);
+      },
+    ), { seed: seed + 59, numRuns: 750 });
+  }, 30_000);
+
+  it('holds 550 invalid stock inputs after multiline rows on their actual physical CSV start line', async () => {
+    const invalid = fc.constantFrom('-0', '-1', ' +1', '+2', '4.2', '1e2', 'NA', 'Infinity', '7,000', '9007199254740992', '');
+    await checkAsyncFuzz(fc.asyncProperty(
+      invalid, whole, fc.nat({ max: 10 }), fc.constantFrom('\r\n', '\r', '\n'), fc.boolean(),
+      async (value, before, blanks, ending, approveLargeDrop) => {
+        const sku = '00001';
+        const baseline = { filename: 'shop.csv', bytes: csvBytes(baselineHeaders,
+          [['part', 'Original', 'Default Title', sku, 'Shelf', '0', '923', String(before)]]) };
+        const feed = file('offer.csv', ['SKU,Qty,Note', `00001,${before},"one\r\ntwo\nthree"`,
+          ...Array.from({ length: blanks }, () => ''), `unmatched,"${value}",invalid`].join(ending));
+        const result = await buildInventorySync(baseline, [{ ...feed, mapping }], { ...reserve, approveLargeDrop });
+        expect(result).toMatchObject({ status: 'blocked', updateCsv: null, rollbackCsv: null, issues: [
+          { code: 'invalid-supplier-quantity', source: 'supplier', supplierIndex: 0, line: 5 + blanks, sku: 'unmatched', value },
+        ] });
+        expect(result.custody).not.toHaveProperty('updateCsvSha256');
+        expect(result.custody).not.toHaveProperty('rollbackCsvSha256');
+      },
+    ), { seed: seed + 60, numRuns: 550 });
+  }, 30_000);
+});
+
+it('accounts for all 35,220 seeded executions without skips', () => {
+  expect(fuzzExecutions).toEqual({ accepted: 35_220, discarded: 0, properties: 61 });
   console.info(`Deterministic fuzz: ${fuzzExecutions.accepted} accepted, ${fuzzExecutions.discarded} discarded across ${fuzzExecutions.properties} properties.`);
 });

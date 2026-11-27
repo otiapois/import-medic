@@ -15,11 +15,11 @@ Every explicit mode needs `--mode <mode>` and `--out-dir <dir>`. Choose a new or
 
 | Exit | Meaning | Files |
 | --- | --- | --- |
-| `0` | The run completed and passed its local checks. `verify` reports `PASS`. A price diff with no changes can pass without a native pair. | Available mode outputs and `custody-manifest.json` |
+| `0` | The run completed and passed its local checks. `verify` reports `PASS`. A price diff or inventory sync with no changes can pass without a native pair. | Available mode outputs and `custody-manifest.json` |
 | `2` | The run completed with a hold or unsafe result. `verify` reports `FAIL_UNSAFE`. | Diagnostic JSON, `custody-manifest.json`, and a review HTML report where the mode provides one for held runs. CSV outputs are withheld. |
 | `1` | Usage, filesystem, or execution error. | Read stderr and treat the run as failed. A completed batch receipt is unavailable. |
 
-A completed explicit batch with exit `0` or `2` writes one JSON line to stdout with `mode`, `status`, `exitCode`, and `outputs`, an array of the output filenames including the manifest. Use `npm run --silent repair-cli -- …` to suppress npm's script banner. `verify` uses `PASS` or `FAIL_UNSAFE`. The other modes use `ready` or `blocked`, with `no-changes` for a valid price diff that would leave the catalog unchanged. A help invocation prints usage text.
+A completed explicit batch with exit `0` or `2` writes one JSON line to stdout with `mode`, `status`, `exitCode`, and `outputs`, an array of the output filenames including the manifest. Use `npm run --silent repair-cli -- …` to suppress npm's script banner. `verify` uses `PASS` or `FAIL_UNSAFE`. The other modes use `ready` or `blocked`, with `no-changes` for a valid price diff or inventory sync that would leave the relevant quantities or catalog cells unchanged. A help invocation prints usage text.
 
 Options ending in `-b64` accept canonical unpadded base64url of UTF-8 text. They can carry values with shell metacharacters. For example, use `node -p "Buffer.from('Q4 Prices').toString('base64url')"` to encode a worksheet name. For a single value, choose one spelling of the option.
 
@@ -120,6 +120,30 @@ Output files are `supplier-delta-report.csv`, `supplier-delta-audit.json`, and `
 ## migrate
 
 Provide one positional CSV path, `--source-platform <shopify|woocommerce|bigcommerce>`, and `--target-platform <shopify|woocommerce|bigcommerce>`. Choose distinct platforms. Output files are `migrated-<source>-to-<target>.csv`, `migration-audit.json`, and `migration-sign-off.html`. Review the source fields that need separate handling in the destination. A hold retains the audit, sign-off, and manifest. [Catalog migration contract](catalog-migrator.md)
+
+## inventory-sync
+
+```sh
+npm run --silent repair-cli -- --mode inventory-sync --baseline fixtures/inventory-sync/synthetic-shopify-baseline.csv --supplier fixtures/inventory-sync/synthetic-supplier.csv --sku-column "Supplier SKU" --quantity-column Stock --target-location "Warehouse A" --reserve-units 2 --zero-out-threshold 2 --out-dir ./batches/inventory-demo
+```
+
+Give `--baseline <csv>` for the Shopify **All states** export and one to three `--supplier <csv|xlsx>` flags. Provide each slot's worksheet and mapping directly after its `--supplier`. Use the exact case-sensitive worksheet name for XLSX. Each column flag accepts an exact unique header or a one-based index. Use a `-b64` flag for a literal numeric header.
+
+| Per-supplier flag | Value or use |
+| --- | --- |
+| `--sheet`, `--sheet-b64` | Exact visible worksheet for XLSX |
+| `--sku-column`, `--sku-column-b64` | Supplier SKU column |
+| `--quantity-column`, `--quantity-column-b64` | Supplier whole-unit stock column |
+
+| Batch flag | Value or use |
+| --- | --- |
+| `--target-location`, `--target-location-b64` | Exact Shopify location name. Required when the source has multiple locations. |
+| `--reserve-units` | Nonnegative whole units to withhold. Defaults to `0`. |
+| `--zero-out-threshold` | Supplier stock at or below this whole-unit threshold becomes zero. Defaults to `0`. |
+| `--max-cap` | Optional nonnegative whole-unit cap on the final quantity. |
+| `--approve-large-drop` | Approve proposed cuts greater than 80% for the current batch after review. |
+
+A ready run writes `inventory-update.csv`, `inventory-rollback.csv`, `inventory-audit.json`, `inventory-sign-off.html`, and `custody-manifest.json`. A `no-changes` run exits `0`. A `blocked` run exits `2`. Both retain the audit, sign-off, and manifest without the native CSVs. [Inventory matching, quantity rules, and Shopify validation](inventory-sync.md)
 
 ## Legacy single-file repair
 

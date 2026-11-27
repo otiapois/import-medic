@@ -7,6 +7,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { repairCsvWithBytes } from '../../../src/core';
+import { parseCsv } from '../../../src/core/csv';
 import { createSupplierRecipe, serializeSupplierRecipe } from '../../../src/core/shopify-price-diff/recipe';
 import { listWorkbookSheets } from '../../../src/core/xlsx';
 
@@ -74,6 +75,39 @@ function verifyReceipt(mode: string, code: 0 | 2, status: string, directory: str
 
 const pricingHeaders = 'Handle,Title,Option1 Name,Option1 Value,Variant SKU,Variant Price,Variant Compare At Price,Cost per item\n';
 const catalog = (price: string) => pricingHeaders + `part,Spare Part,Title,Default Title,0001,${price},,5.00\nkit,Bundle,Title,Default Title,KIT,20.00,,10.00\n`;
+
+describe('M19 real CLI subprocess', () => {
+  it('publishes exact scoped CAS bytes and holds the same inputs without a location', () => {
+    const baseline = fixture('inventory-sync/synthetic-shopify-baseline.csv');
+    const supplier = fixture('inventory-sync/synthetic-supplier.csv');
+    const second = content('another-supplier.csv', 'Stock,SKU\n00011,00042\n');
+    const baseArgs = ['--baseline', baseline, '--supplier', supplier, '--sku-column-b64', b64('Supplier SKU'),
+      '--quantity-column', '2', '--supplier', second, '--sku-column', 'SKU', '--quantity-column', 'Stock',
+      '--reserve-units', '2', '--zero-out-threshold', '2'];
+    const inputs = { baseline, 'supplier-1': supplier, 'supplier-2': second };
+    const good = resolve(scratch, 'inventory-good');
+    const reportFiles = ['inventory-audit.json', 'inventory-sign-off.html'];
+    verifyReceipt('inventory-sync', 0, 'ready', good, [...baseArgs, '--target-location-b64', b64('Warehouse A')], inputs,
+      [...reportFiles, 'inventory-update.csv', 'inventory-rollback.csv']);
+    const update = readFileSync(resolve(good, 'inventory-update.csv'));
+    const rollback = readFileSync(resolve(good, 'inventory-rollback.csv'));
+    const qty = (file: Buffer) => parseCsv(file.toString('utf8')).records.slice(1).map(({ cells }) => cells.slice(-4));
+    expect(qty(update)).toEqual([['00042', 'Warehouse A', '0007', '9'], ['00087', 'Warehouse A', '0002', '6']]);
+    expect(qty(rollback)).toEqual([['00042', 'Warehouse A', '9', '0007'], ['00087', 'Warehouse A', '6', '0002']]);
+    const audit = JSON.parse(readFileSync(resolve(good, 'inventory-audit.json'), 'utf8'));
+    expect(audit).toMatchObject({ status: 'ready', targetLocation: 'Warehouse A',
+      custody: { updateCsvSha256: digest(update), rollbackCsvSha256: digest(rollback) } });
+    const html = readFileSync(resolve(good, 'inventory-sign-off.html'), 'utf8');
+    for (const data of [readFileSync(baseline), readFileSync(supplier), readFileSync(second), update, rollback]) expect(html).toContain(digest(data));
+
+    const held = resolve(scratch, 'inventory-held');
+    verifyReceipt('inventory-sync', 2, 'blocked', held, baseArgs, inputs, reportFiles);
+    const heldAudit = JSON.parse(readFileSync(resolve(held, 'inventory-audit.json'), 'utf8'));
+    expect(heldAudit.issues).toMatchObject([{ code: 'target-location-required' }]);
+    expect(heldAudit.custody.updateCsvSha256).toBeUndefined();
+    expect(heldAudit.custody.rollbackCsvSha256).toBeUndefined();
+  }, 45_000);
+});
 
 describe('M18 real CLI subprocess', () => {
   it('preserves the original help, audit, CSV streams and reviewable exit 2', () => {

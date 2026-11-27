@@ -3,7 +3,7 @@ import { basename, dirname, join, parse, resolve, sep } from 'node:path';
 import { parseArgs } from 'node:util';
 import { z } from 'zod';
 import { sha256, type RepairCustody } from '../src/core/audit/custody';
-import { cliModes, createCustodyManifest, dispatchCli, storePlatforms, type CliArtifact, type CliRequest, type DeltaSource, type PriceSupplier } from '../src/core/cli/dispatch';
+import { cliModes, createCustodyManifest, dispatchCli, storePlatforms, type CliArtifact, type CliInventorySupplier, type CliRequest, type DeltaSource, type PriceSupplier } from '../src/core/cli/dispatch';
 import { isSafeFileName, isSafeLocalPath } from '../src/core/cli/paths';
 import { PLATFORM_IDS, repairCsvWithBytes } from '../src/core/index';
 import { hasDuplicateKeys, profileText } from '../src/core/shopify-price-diff/settings-validation';
@@ -82,6 +82,7 @@ async function legacyMain() {
 
 const repairFlags = ['date-order', 'qbo-layout', 'qbo-credit-debit', 'stripe-paypal-output', 'stripe-paypal-fee-convention', 'exclude-paypal-memo', 'formula-guard'];
 const supplierFlags = ['supplier', 'sheet', 'sheet-b64', 'recipe', 'label', 'label-b64'];
+const inventorySupplierFlags = ['supplier', 'sheet', 'sheet-b64', 'sku-column', 'sku-column-b64', 'quantity-column', 'quantity-column-b64'];
 const checks = ['mapping', 'currency', 'fx'] as const;
 const deltaSides = ['previous', 'next'] as const;
 const deltaFields = { skuColumn: 'sku', costColumn: 'cost', inventoryColumn: 'inventory' } as const;
@@ -97,12 +98,14 @@ const modeFlags = {
   promo: ['platform', 'baseline', 'discount-mode', 'discount-amount', 'minimum-retail', 'rounding', 'preserve-higher-compare-at',
     ...scopeFlags.flatMap(flag => [flag, `${flag}-b64`]), 'skip-line', 'cost-check', 'cost-sheet', 'store-label', 'store-label-b64'],
   'supplier-delta': deltaFlags,
+  'inventory-sync': ['baseline', ...inventorySupplierFlags, 'target-location', 'target-location-b64', 'reserve-units',
+    'zero-out-threshold', 'max-cap', 'approve-large-drop'],
   migrate: ['source-platform', 'target-platform'],
 };
 const booleanFlags = new Set(['help', 'exclude-paypal-memo', 'formula-guard', ...checks.map(check => `confirm-${check}`),
-  'confirm-conflict-policy', 'preserve-higher-compare-at', 'cost-check']);
+  'confirm-conflict-policy', 'preserve-higher-compare-at', 'cost-check', 'approve-large-drop']);
 const sharedFlags = ['mode', 'help', 'out-dir'];
-const repeatable = new Set([...supplierFlags, ...checks.map(check => `confirm-${check}-supplier`), 'sku', 'sku-b64', 'skip-line']);
+const repeatable = new Set([...supplierFlags, ...inventorySupplierFlags, ...checks.map(check => `confirm-${check}-supplier`), 'sku', 'sku-b64', 'skip-line']);
 const allOptions = Object.fromEntries([...new Set([...sharedFlags, ...Object.values(modeFlags).flat()])].map(name =>
   [name, { type: booleanFlags.has(name) ? 'boolean' as const : 'string' as const, ...(name === 'help' ? { short: 'h' } : {}) }]));
 
@@ -112,6 +115,7 @@ const modeUsage = {
   verify: '--platform <store> --baseline <csv> --candidate <csv> [--matched-update <csv>]',
   promo: '--platform <store> --baseline <csv> --discount-mode <percent-off|fixed-amount-off> --discount-amount <decimal> --minimum-retail <decimal> [--cost-sheet <csv|xlsx>]',
   'supplier-delta': '--previous <csv|xlsx> --next <csv|xlsx> [--previous-sheet <name>] [--next-sheet <name>]',
+  'inventory-sync': '--baseline <csv> --supplier <csv|xlsx> [--sheet <name>] --sku-column <header|1-based position> --quantity-column <header|1-based position> … [--target-location <name>]',
   migrate: '--source-platform <store> --target-platform <store> <input.csv>',
 };
 
@@ -235,6 +239,21 @@ async function explicitMain(args: string[]) {
     return encoded === undefined ? raw : decodeName(encoded);
   };
   const repeated = (name: string) => tokens.flatMap(token => token.kind === 'option' && token.name === name ? [token.value!] : []);
+  const supplierGroups = (flags: string[]) => {
+    const groups: Array<Record<string, { value: string; encoded: boolean }>> = [];
+    for (const token of tokens) {
+      if (token.kind !== 'option' || !flags.includes(token.name)) continue;
+      const { name, value } = token;
+      if (name === 'supplier') { groups.push({ supplier: { value: value!, encoded: false } }); continue; }
+      const group = groups.at(-1);
+      const field = name.replace(/-b64$/, '');
+      if (!group || group[field] !== undefined) throw new Error(`Place one --${field} after the relevant --supplier.`);
+      const encoded = name.endsWith('-b64');
+      group[field] = { value: encoded ? decodeName(value!) : value!, encoded };
+    }
+    if (groups.length < 1 || groups.length > 3) throw new Error('Provide one to three --supplier inputs.');
+    return groups;
+  };
   const outDir = localPath(required('out-dir'));
   const inputs: CliArtifact[] = [];
   const read = (role: string, filename: string | undefined, extension?: RegExp) => {
@@ -265,17 +284,7 @@ async function explicitMain(args: string[]) {
     }
     case 'price-diff': {
       const platform = store('platform');
-      const groups: Array<Record<string, string>> = [];
-      for (const token of tokens) {
-        if (token.kind !== 'option' || !supplierFlags.includes(token.name)) continue;
-        const { name, value } = token;
-        if (name === 'supplier') { groups.push({ supplier: value! }); continue; }
-        const group = groups.at(-1);
-        const field = name.replace(/-b64$/, '');
-        if (!group || group[field] !== undefined) throw new Error(`Place one --${field} after the relevant --supplier.`);
-        group[field] = name.endsWith('-b64') ? decodeName(value!) : value!;
-      }
-      if (groups.length < 1 || groups.length > 3) throw new Error('Provide one to three --supplier inputs.');
+      const groups = supplierGroups(supplierFlags);
       const supplierNumber = (value: string) => {
         const index = number(value);
         if (index > groups.length) throw new Error('Choose an available supplier by its 1-based command order.');
@@ -297,8 +306,8 @@ async function explicitMain(args: string[]) {
       const suppliers = groups.map(({ supplier, sheet, recipe, label }, index): PriceSupplier => {
         const order = index + 1;
         return {
-          file: read(`supplier-${order}`, supplier, /\.(?:csv|xlsx)$/i), sheet: text(sheet), label: text(label),
-          recipe: recipe === undefined ? undefined : read(`recipe-${order}`, recipe, /\.json$/i),
+          file: read(`supplier-${order}`, supplier.value, /\.(?:csv|xlsx)$/i), sheet: text(sheet?.value), label: text(label?.value),
+          recipe: recipe === undefined ? undefined : read(`recipe-${order}`, recipe.value, /\.json$/i),
           confirmed: confirm('mapping', order), currencyConfirmed: confirm('currency', order), fxConfirmed: confirm('fx', order),
           resolutions: resolutions[String(order) as keyof typeof resolutions],
         };
@@ -342,6 +351,33 @@ async function explicitMain(args: string[]) {
           columns: { skuColumn: column('sku'), costColumn: column('cost'), inventoryColumn: inventoryOff ? null : column('inventory') } };
       };
       request = { mode, previous: side('previous'), next: side('next') };
+      break;
+    }
+    case 'inventory-sync': {
+      const groups = supplierGroups(inventorySupplierFlags);
+      const baseline = source('baseline');
+      const suppliers = groups.map((group, index): CliInventorySupplier => {
+        const column = (optionName: string) => {
+          const choice = group[optionName];
+          if (choice === undefined) return undefined;
+          return !choice.encoded && /^\d+$/.test(choice.value)
+            ? { index: rowNumber.safeParse(choice.value).success ? number(choice.value) - 1 : -1 }
+            : { header: choice.value };
+        };
+        return { ...read(`supplier-${index + 1}`, group.supplier.value, /\.(?:csv|xlsx)$/i), sheetName: group.sheet?.value,
+          columns: { skuColumn: column('sku-column'), quantityColumn: column('quantity-column') } };
+      });
+      const wholeNumber = (name: string) => {
+        const value = option(name);
+        return value === undefined ? undefined : /^\d+$/.test(value) ? Number(value) : NaN;
+      };
+      request = { mode, baseline, suppliers, options: {
+        targetLocation: named('target-location'),
+        reserveUnits: wholeNumber('reserve-units') ?? 0,
+        zeroOutThreshold: wholeNumber('zero-out-threshold') ?? 0,
+        maxCap: wholeNumber('max-cap'),
+        approveLargeDrop: flag('approve-large-drop'),
+      } };
       break;
     }
     case 'migrate': {

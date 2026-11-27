@@ -1,0 +1,6 @@
+Handle,Title,Option1 Name,Option1 Value,Option2 Name,Option2 Value,Option3 Name,Option3 Value,SKU,HS Code,COO,Location,Bin name,Available (not editable),On hand (current),On hand (new)
+canvas-tote,Canvas Tote,Color,Sand,,,,,00042,4202.92,CN,Warehouse A,A-01,5,0007,
+canvas-tote,Canvas Tote,Color,Sand,,,,,00042,4202.92,CN,Warehouse B,B-01,19,0020,98
+field-mug,Field Mug,Title,Default Title,,,,,00087,6912.00,PT,Warehouse A,A-02,1,0002,
+field-mug,Field Mug,Title,Default Title,,,,,00087,6912.00,PT,Warehouse B,B-02,8,0010,
+desk-tray,Desk Tray,Title,Default Title,,,,,00303,4420.90,CA,Warehouse A,A-03,3,0004,

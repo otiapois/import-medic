@@ -1,0 +1,42 @@
+.inventory-demo { max-width: 100%; white-space: normal; }
+.inventory-files { align-items: start; margin-top: 13px; }
+.inventory-files .drop-zone { min-height: 74px; padding-block: 8px; gap: 4px; }
+.inventory-files .price-file-selection:has(.price-sheet) { grid-template-columns: minmax(0, 1fr); }
+.inventory-suppliers { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+.inventory-supplier-slot { min-width: 0; }
+.inventory-add { justify-self: start; }
+.inventory-remove { margin-top: 5px; }
+.inventory-sync .inventory-mapping { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 8px; }
+.inventory-sync :is(.inventory-mapping, .inventory-settings) label { margin-bottom: 3px; }
+.inventory-settings { min-width: 0; margin-top: 9px; border: 1px solid var(--line); border-radius: 9px; padding: 8px 12px 10px; }
+.inventory-settings legend { padding-inline: 4px; font-size: .9rem; font-weight: 680; }
+.inventory-settings [aria-invalid='true'] { border-color: #873822; }
+.inventory-review { display: grid; grid-template-columns: minmax(0, 1fr); gap: 9px; margin-top: 17px; }
+.inventory-review > .field-help, .inventory-review .custody-fingerprints { margin-top: 0; }
+.inventory-scope { color: var(--muted); overflow-wrap: anywhere; font-size: .875rem; }
+.inventory-scope strong { color: var(--ink); }
+.inventory-filters { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, .55fr); align-items: end; gap: 9px; max-width: 535px; }
+.inventory-filters .price-search { width: 100%; margin-top: 0; }
+.inventory-filters .price-search input { min-height: 38px; }
+.inventory-table-region { position: relative; }
+.inventory-table-region:focus-visible { outline-offset: -3px; }
+.inventory-table code { font-variant-numeric: tabular-nums; }
+.inventory-table td > code { white-space: pre-wrap; }
+[data-inventory-row-status='changed'] .delta-row-status { background: var(--teal-soft); color: var(--teal-strong); }
+:is([data-inventory-row-status='approval-required'], [data-inventory-row-status='blocked']) .delta-row-status { background: var(--amber-soft); color: var(--amber); }
+.inventory-approval { padding: 8px 12px; border: 1px solid #b68740; border-radius: 7px; background: var(--amber-soft); color: var(--amber); }
+.inventory-approval p { font-size: .875rem; }
+.inventory-approval .checkbox-label { gap: 10px; font-weight: 680; font-size: .9rem; }
+.inventory-issues { min-width: 0; margin-top: 5px; overflow-wrap: anywhere; }
+.inventory-issues li { font-size: .875rem; }
+.inventory-issue-evidence { display: flex; flex-wrap: wrap; gap: 3px 10px; color: var(--muted); }
+.inventory-issues code { white-space: pre-wrap; }
+.inventory-offers { padding-inline-start: 14px; }
+.inventory-issues .inventory-offers > li { padding: 2px 0; border: 0; }
+
+@media (max-width: 740px) {
+  .inventory-sync .inventory-settings .price-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 490px) {
+  .inventory-filters { grid-template-columns: minmax(0, 1fr); }
+}

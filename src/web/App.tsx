@@ -33,8 +33,8 @@ export function App({ page }: { page: Page }) {
         event.preventDefault();
         setShortcutOrigin(origin);
       } else {
-        const search = document.querySelector<HTMLInputElement>('[data-price-row-search]');
-        if (!search || search.closest('[hidden]')) return;
+        const search = document.querySelector<HTMLInputElement>('[data-price-row-search]:not([hidden] *)');
+        if (!search) return;
         event.preventDefault();
         search.focus();
       }

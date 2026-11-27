@@ -1,7 +1,7 @@
 import { useId, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 
-type Mode = 'repair' | 'price-diff' | 'verify' | 'promo' | 'supplier-delta' | 'migrate';
+type Mode = 'repair' | 'price-diff' | 'verify' | 'promo' | 'supplier-delta' | 'migrate' | 'inventory-sync';
 const SHELL_TOKEN = /^[A-Za-z0-9_.=-]+$/;
 const WINDOWS_SHELL_LIMIT = 8191;
 

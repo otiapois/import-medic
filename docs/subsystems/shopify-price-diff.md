@@ -15,7 +15,7 @@ The default `block-conflicts` policy holds the native pair when sources disagree
 
 ## Inventory quantity
 
-Quantity mapping is optional and starts at **Leave unchanged**. The baseline reader accepts the current `Inventory quantity` heading and legacy `Variant Inventory Qty`. This is Shopify's product CSV quantity field for single-location stores. Multi-location stock uses Shopify's inventory CSV. [Shopify product CSV format](https://help.shopify.com/en/manual/products/import-export/using-csv) · [Shopify location inventory CSV](https://help.shopify.com/en/manual/inventory-and-locations/setup/inventory-csv)
+Quantity mapping is optional and starts at **Leave unchanged**. The baseline reader accepts the current `Inventory quantity` heading and legacy `Variant Inventory Qty`. This is Shopify's product CSV quantity field for single-location stores. [Inventory Sync](inventory-sync.md) handles on-hand changes at a chosen location using a Shopify inventory CSV. [Shopify product CSV format](https://help.shopify.com/en/manual/products/import-export/using-csv) · [Shopify location inventory CSV](https://help.shopify.com/en/manual/inventory-and-locations/setup/inventory-csv)
 
 Supplier quantity must be a plain nonnegative whole number. Blank, fractional, negative, formula-derived, and invalid values block the native pair until corrected or skipped. The configurable drop guard defaults to 80% and reviews a drop strictly above the threshold. A transition from positive stock to zero also requires review. The user can approve a valid flagged quantity, enter a replacement quantity, or skip the row. Inventory-only changes count as updates.
 
