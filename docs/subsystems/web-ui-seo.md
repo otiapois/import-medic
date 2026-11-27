@@ -33,6 +33,12 @@
 - The **SHA-256 file fingerprints** section displays Baseline, supplier files, the optional BOM, and the available Update CSV and Rollback CSV on `/shopify-price-update-diff`. On the home single-file workbench it displays Source CSV and the available Repaired CSV. Each fingerprint has a copy control. If clipboard access fails, the control selects the text for manual copying. The values come from the current completed worker run and match its JSON audit and sign-off footer.
 - Uploaded files, diagnostics, edits, and reports stay in memory until the browser creates a local download. The workbenches use same-origin static code assets and keep user data in the browser without persistent storage.
 
+## Local CLI Command
+
+The single-file repair and five Price Update Studio modes each offer a collapsed **Local CLI Command** disclosure after the existing workflow controls. Open it to read or copy a command for a local ImportMedic checkout. Use the npm bundled with a supported Node.js release. Replace example filenames with local paths and choose a fresh output directory. Clipboard denial selects the read-only command for manual copying. The helper keeps uploaded paths and file bytes out of the command. Worksheet names and other exact text settings use UTF-8 base64url flags where needed. A long command can exceed the Windows npm launcher's limit, including after longer local paths are substituted.
+
+In **Build Update**, confirm the applicable mappings, then save a current **Supplier Recipe (.json)** for each supplier in the displayed order. Use these files with the placeholder recipe arguments. The helper carries the current market, applicable confirmations, and row review decisions. For an XLSX bundle BOM, save its worksheet to CSV and select the CSV before copying a command. In single-file repair, apply browser cell corrections to a local copy before replay. Commands use default CLI report branding.
+
 ## Agency Sign-Off Branding
 
 **Agency Sign-Off Branding** appears under **Workspace profile** in the price workbench and next to Bookkeeper export in single-file repair. The price workbench carries one in-memory brand across the Client, Campaign, Supplier Delta, and Migration reports. The Bookkeeper drawer can edit its own brand or restore the brand from a downloaded Workspace Profile JSON. Loading a profile there uses its branding and leaves the current repair settings in place. Use the JSON to carry settings across page navigation or sessions.

@@ -1,6 +1,8 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { PromoCampaignOptions } from '../../../core/promo-campaign/types';
+import { baselinePrice } from '../../../core/shopify-price-diff/prices';
 import type { StorePlatform } from '../../../core/shopify-price-diff/workspace-profile';
+import { encodeCliText, exampleSheetPath, LocalCliCommand } from '../LocalCliCommand';
 import type { GeneratedPairSource } from '../PriceDiffWorkbench';
 import { PriceFileInput } from '../PriceFileInput';
 import { STORE_PLATFORMS } from '../WorkspaceProfile';
@@ -303,6 +305,22 @@ export default function PromoCampaignPanel({ initialPlatform, onPairAvailable, o
         {baseline ? <CampaignExports report={report?.summary} onDownload={download} onVerify={onVerify} /> : null}
         {downloadError ? <p className="file-message file-error" role="alert">{downloadError}</p> : null}
       </section>
+      <LocalCliCommand mode="promo"
+        unavailable="Enter a discount and minimum retail as decimals, finish the selected scope, and clear any cost sheet error."
+        getArguments={() => baselinePrice.test(rule.amount) && baselinePrice.test(rule.minimumRetail) && scopeReady && !(costCheck && costError)
+          ? [
+            '--platform', platform, '--baseline', 'baseline.csv',
+            '--discount-mode', rule.mode, '--discount-amount', rule.amount,
+            '--minimum-retail', rule.minimumRetail, '--rounding', rule.rounding,
+            ...(isShopify && rule.preserveHigherCompareAt ? ['--preserve-higher-compare-at'] : []),
+            ...(scopeKind === 'prefix' ? ['--sku-prefix-b64', encodeCliText(skuPrefix)] : scopeKind === 'list'
+              ? skus.flatMap((sku) => ['--sku-b64', encodeCliText(sku)]) : []),
+            ...(isShopify && handle ? ['--handle-b64', encodeCliText(handle)] : []),
+            ...(isShopify && tag ? ['--tag-b64', encodeCliText(tag)] : []),
+            ...skipLineNumbers.flatMap((line) => ['--skip-line', String(line)]),
+            ...(costCheck ? ['--cost-check'] : []),
+            ...(costCheck && costSheet ? ['--cost-sheet', exampleSheetPath('cost-sheet', costSheet.file.name)] : []),
+          ] : null} />
     </section>
   );
 }

@@ -13,6 +13,7 @@ import type {
   StripePayPalOutput,
 } from '../core/types';
 import { SHOPIFY_PRICE_UPDATE_PATH } from './seo/routes';
+import { LocalCliCommand } from './workbench/LocalCliCommand';
 import { Results } from './workbench/Results';
 import { ModeNavigation } from './workbench/ModeNavigation';
 import { useSignoffBranding } from './workbench/SignoffBranding';
@@ -319,6 +320,20 @@ export function Workbench({ initialPlatform }: { initialPlatform: PlatformId }) 
           onDownload={download}
         />
       ) : null}
+      <div className="price-section local-cli-section">
+        <LocalCliCommand mode="repair" getArguments={() => [
+          '--platform', platform, 'source.csv',
+          ...(options.dateOrder ? ['--date-order', options.dateOrder] : []),
+          ...(options.qboLayout ? ['--qbo-layout', options.qboLayout] : []),
+          ...(options.qboCreditDebit ? ['--qbo-credit-debit', options.qboCreditDebit] : []),
+          ...(options.stripePayPalOutput ? ['--stripe-paypal-output', options.stripePayPalOutput] : []),
+          ...(options.stripePayPalFeeConvention ? ['--stripe-paypal-fee-convention', options.stripePayPalFeeConvention] : []),
+          ...(options.excludePayPalMemo ? ['--exclude-paypal-memo'] : []),
+          ...(options.formulaGuard ? ['--formula-guard'] : []),
+        ]}>
+          {edits.length ? <p className="field-help">Browser cell corrections stay in this session. Apply those corrections to a local copy of the source before replaying it.</p> : null}
+        </LocalCliCommand>
+      </div>
     </section>
   );
 }

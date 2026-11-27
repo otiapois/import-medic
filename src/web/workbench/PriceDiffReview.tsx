@@ -11,6 +11,7 @@ import { BatchImpact } from './BatchImpact';
 import { BundleCostRollup } from './BundleCostRollup';
 import { PriceFingerprints } from './CustodyFingerprints';
 import { downloadFile, FormulaGuard } from './downloads';
+import { encodeCliText, exampleSheetPath, LocalCliCommand } from './LocalCliCommand';
 import { PAGE_SIZE, Pagination, pagination } from './Pagination';
 import { DiffIssueList, PriceDiffIssues } from './PriceDiffIssues';
 import type { GeneratedPairSource, MappingDrafts, ReviewSource } from './PriceDiffWorkbench';
@@ -302,6 +303,39 @@ export function PriceDiffReview({ platform, workspaceCurrency, session, worker, 
     return true;
   }
 
+  const xlsxBom = Boolean(bom && /\.xlsx$/i.test(bom.name));
+
+  function getCliArguments() {
+    if (!baselineFile || xlsxBom || !canCompare || !allConfirmed || summary?.mappingBlocked || settings.some(({ source }) =>
+      /\.xlsx$/i.test(source.filename) && !source.worksheet)) return null;
+    const args = ['--platform', platform, '--baseline', 'baseline.csv'];
+    for (const [index, { source }] of settings.entries()) {
+      const slot = index + 1;
+      args.push('--supplier', exampleSheetPath(`supplier-${slot}`, source.filename));
+      if (source.worksheet) args.push('--sheet-b64', encodeCliText(source.worksheet));
+      args.push('--recipe', `supplier-${slot}-recipe.json`);
+      if (source.labelOverride) args.push('--label-b64', encodeCliText(source.labelOverride));
+    }
+    args.push('--confirm-mapping');
+    for (const option of [
+      { name: 'currency', confirmed: settings.map(({ selection }) => selection.sameCurrencyConfirmed) },
+      { name: 'fx', confirmed: settings.map(({ fx, selection }) => fx && selection.fxRateConfirmed) },
+    ]) {
+      if (option.confirmed.every(Boolean)) args.push(`--confirm-${option.name}`);
+      else option.confirmed.forEach((confirmed, index) => {
+        if (confirmed) args.push(`--confirm-${option.name}-supplier`, String(index + 1));
+      });
+    }
+    if (market) args.push('--market-b64', encodeCliText(market.name));
+    if (bom) args.push('--bom', 'bom.csv');
+    if (bomPricingSupplierId) args.push('--bom-pricing-supplier', String(sources.findIndex(({ id }) => id === bomPricingSupplierId) + 1));
+    if (multiple) args.push('--conflict-policy', conflictPolicy);
+    if (multiple && conflictPolicyConfirmed) args.push('--confirm-conflict-policy');
+    const decisions = Object.fromEntries(sources.flatMap(({ id }, index) => resolutions[id] ? [[index + 1, resolutions[id]]] : []));
+    if (Object.keys(decisions).length) args.push('--resolutions-b64', encodeCliText(JSON.stringify(decisions)));
+    return args;
+  }
+
   return (
     <section className="workbench-results price-review" aria-labelledby={`${id}-heading`}>
       <div className="price-section price-settings">
@@ -444,6 +478,13 @@ export function PriceDiffReview({ platform, workspaceCurrency, session, worker, 
             source.id, { selection: { ...draftSelection, formulaGuard }, unresolved: draftUnresolved, remapped },
           ])));
         }} onDownload={download} />
+      <div className="price-section local-cli-section">
+        <LocalCliCommand mode="price-diff" getArguments={getCliArguments}
+          unavailable={xlsxBom ? 'Save the Bundle BOM worksheet as a CSV and select that file to prepare the command.'
+            : 'Add the baseline, then review and confirm the settings for each supplier.'}>
+          <p className="field-help">Use Save Supplier Recipe (.json) for each supplier. Replace the example recipe filenames in the same supplier order.</p>
+        </LocalCliCommand>
+      </div>
     </section>
   );
 }

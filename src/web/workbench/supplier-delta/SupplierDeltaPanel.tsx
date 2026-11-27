@@ -2,6 +2,7 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { PriceFileInput } from '../PriceFileInput';
 import { downloadFile } from '../downloads';
 import { useSignoffFingerprint } from '../CustodyFingerprints';
+import { encodeCliText, exampleSheetPath, LocalCliCommand } from '../LocalCliCommand';
 import { useSignoffBranding } from '../SignoffBranding';
 import { DeltaWorker } from './deltaWorker';
 import type { DeltaArtifact, DeltaInspection, DeltaMapping, DeltaSide, DeltaSummary } from './deltaWorker';
@@ -226,6 +227,21 @@ export default function SupplierDeltaPanel({ active }: { active: boolean }) {
   const status = current?.error ? 'Comparison stopped' : ready ? 'Ready to download' : report ? 'Review required' :
     inputs ? 'Comparing supplier costs…' : previous.reading || next.reading ? 'Reading supplier files…' : 'Choose two supplier files';
 
+  function getCliArguments() {
+    const args: string[] = [];
+    for (const [side, { source, inspection, mapping, reading, error }] of [['previous', previous], ['next', next]] as const) {
+      const path = exampleSheetPath(side, source?.file.name);
+      if (reading || error || (path.endsWith('.xlsx') && !inspection?.selectedSheet)) return null;
+      args.push(`--${side}`, path);
+      if (inspection?.selectedSheet) args.push(`--${side}-sheet-b64`, encodeCliText(inspection.selectedSheet));
+      if (mapping.skuColumn != null) args.push(`--${side}-sku-column`, String(mapping.skuColumn + 1));
+      if (mapping.costColumn != null) args.push(`--${side}-cost-column`, String(mapping.costColumn + 1));
+      if (mapping.inventoryColumn === null) args.push(`--${side}-inventory-column`, 'none');
+      else if (mapping.inventoryColumn !== undefined) args.push(`--${side}-inventory-column`, String(mapping.inventoryColumn + 1));
+    }
+    return args;
+  }
+
   return (
     <div className="price-section supplier-delta">
       <div className="price-heading">
@@ -263,6 +279,8 @@ export default function SupplierDeltaPanel({ active }: { active: boolean }) {
         {report?.summary.status === 'blocked' ? <p className="field-help">Resolve the blocking issues or download the JSON audit for details.</p> : null}
         {downloadError ? <p className="file-message file-error" role="alert">{downloadError}</p> : null}
       </section>
+      <LocalCliCommand mode="supplier-delta" getArguments={getCliArguments}
+        unavailable="Wait for the selected sheets to be read or fix a file error to prepare the command." />
     </div>
   );
 }

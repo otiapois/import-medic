@@ -150,9 +150,11 @@ export function applySupplierRecipe(
     const matches = sheets.filter((sheet) => recipe.version === 6
       ? sheet.name === recipe.selectedSheet && (supplier.sheetNames?.includes(sheet.name) ?? true)
       : headerKey(sheet.name) === headerKey(name));
-    if (matches.length !== 1 || matches[0].name !== name) {
-      const code = matches.length > 1 ? 'recipe-ambiguous-sheet' : 'recipe-missing-sheet';
-      const message = matches.length > 1 ? `The workbook has ambiguous matches for worksheet “${name}”.` : `This recipe requires the exact XLSX worksheet “${name}”.`;
+    const ambiguous = matches.length > 1 || (recipe.version !== 6 &&
+      (supplier.sheetNames ?? []).filter(sheet => headerKey(sheet) === headerKey(name)).length > 1);
+    if (ambiguous || matches.length !== 1 || matches[0].name !== name) {
+      const code = ambiguous ? 'recipe-ambiguous-sheet' : 'recipe-missing-sheet';
+      const message = ambiguous ? `The workbook has ambiguous matches for worksheet “${name}”.` : `This recipe requires the exact XLSX worksheet “${name}”.`;
       return { ok: false, diagnostics: [{ code, message, field: 'sheetName', expected: name }] };
     }
     sheetIndex = sheets.indexOf(matches[0]);

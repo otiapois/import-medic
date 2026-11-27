@@ -108,7 +108,7 @@ ${kit.oldCostEvidence ? `<p>Previous cost evidence · ${source(kit.oldCostEviden
 export function createSignoffHtml(
   baseline: Baseline, result: Pick<PriceDiffResult, 'rows' | 'canDownload' | 'rollbackVerification'> &
     Partial<Pick<PriceDiffResult, 'supplierPricing' | 'conflictCount' | 'conflictPolicy' | 'inventoryEnabled' | 'issues' | 'market' | 'bom'>>,
-  rule?: PricingRule, cached?: CachedImpact, custody?: PriceCustody, branding?: SignoffBrand,
+  rule?: PricingRule, cached?: CachedImpact, custody?: PriceCustody, branding?: SignoffBrand, storeLabel?: string,
 ): string {
   const woo = baseline.platform === 'woocommerce';
   const bigcommerce = baseline.platform === 'bigcommerce';
@@ -196,7 +196,7 @@ small,.supplier-detail{display:block}
 </style>
 </head>
 <body><main>
-<h1>${heading}</h1>
+<h1>${heading}</h1>${storeLabel === undefined ? '' : `\n<p>Store · ${escape(storeLabel)}</p>`}
 <p>Review the proposed prices${result.inventoryEnabled ? ' and quantities' : ''} before importing the matching ${platformName} update CSV.</p>
 <dl class="summary">${metrics.map(([label, value]) => `<div><dt>${label}</dt><dd>${escape(value)}</dd></div>`).join('')}</dl>
 <p>The average covers updated ${bigcommerce ? 'products and SKUs' : woo ? 'products and variations' : 'variants'} with a comparable baseline price.</p>

@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import fc from 'fast-check';
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { describe, expect, it } from 'vitest';
-import { repairCsv } from '../../../src/core';
+import { repairCsv, repairCsvWithBytes } from '../../../src/core';
 import { sha256 } from '../../../src/core/audit/custody';
 import { analyzeCatalogImpact, createCatalogImpact } from '../../../src/core/analytics/catalog-impact';
 import { parseBigCommerceBaseline } from '../../../src/core/bigcommerce-price-diff/source';
@@ -12,6 +12,8 @@ import { brandCatalogMigrationReports, buildCatalogMigration, type CatalogPlatfo
 import { readBigCommerce } from '../../../src/core/catalog-migrator/bigcommerce';
 import { readShopify } from '../../../src/core/catalog-migrator/shopify';
 import { readWooCommerceCatalog } from '../../../src/core/catalog-migrator/woocommerce';
+import { createCustodyManifest, dispatchCli, type CliResult } from '../../../src/core/cli/dispatch';
+import { isSafeFileName, isSafeLocalPath } from '../../../src/core/cli/paths';
 import { decodeCsv, parseCsv, serializeCsv } from '../../../src/core/csv';
 import { guardSpreadsheetCell } from '../../../src/core/formula-guard';
 import { buildPromoCampaign, type PromoCampaignOptions } from '../../../src/core/promo-campaign/engine';
@@ -1820,7 +1822,112 @@ describe('M17 bundle DAG, cycle, orphan and native byte replay', () => {
   }
 });
 
-it('accounts for all 30,220 seeded executions without skips', () => {
-  expect(fuzzExecutions).toEqual({ accepted: 30_220, discarded: 0, properties: 53 });
+describe('M18 CLI engine parity and custody', () => {
+  const catalog = (sku: string, price: string) => csvBytes(
+    ['Handle', 'Title', 'Option1 Name', 'Option1 Value', 'Variant SKU', 'Variant Price', 'Variant Compare At Price'],
+    [['part', 'Spare Part', 'Title', 'Default Title', sku, price, '']],
+  );
+  const amount = fc.integer({ min: 1_000, max: 50_000 });
+  const sku = fc.integer({ min: 1, max: 900_000 }).map(value => '00' + value);
+  const artifact = (run: CliResult, role: string) => run.artifacts.find(file => file.role === role)?.bytes;
+  const guarded = (run: CliResult, unsafe: boolean) => {
+    expect(run.exitCode).toBe(unsafe ? 2 : 0);
+    if (unsafe) expect(run.artifacts.every(file => !file.filename.endsWith('.csv'))).toBe(true);
+  };
+
+  it('checks 450 CLI repairs for exact native bytes or an explicit hold with a receipt', async () => {
+    await checkAsyncFuzz(fc.asyncProperty(sku, amount, fc.boolean(), async (key, price, unsafe) => {
+      const source = { filename: 'products.csv', bytes: catalog(key, unsafe ? 'Call for price' : cents(BigInt(price))) };
+      const generatedAt = new Date('2026-01-01T12:00:00.000Z');
+      const expected = repairCsvWithBytes(source.bytes, source.filename, 'shopify-products', {}, []);
+      const run = await dispatchCli({ mode: 'repair', platform: 'shopify-products', source, options: {}, generatedAt });
+      guarded(run, unsafe);
+      if (!unsafe) expect(artifact(run, 'repaired')).toEqual(expected.verifiedBytes);
+      else expect(expected.result.needsManualReviewCount).toBeGreaterThan(0);
+      const manifest = JSON.parse(await createCustodyManifest('repair', run.exitCode, [{ role: 'source', ...source }], run.artifacts));
+      const digest = ({ bytes: content }: { bytes: Uint8Array }) => createHash('sha256').update(content).digest('hex');
+      expect(manifest.inputs[0]).toEqual({ role: 'source', filename: source.filename, byteLength: source.bytes.byteLength, sha256: digest(source) });
+      expect(manifest.outputs.map((file: { sha256: string }) => file.sha256)).toEqual(run.artifacts.map(digest));
+    }), { seed: seed + 53, numRuns: 450 });
+  }, 30_000);
+
+  it('checks 500 price comparisons against both exact core CSVs and withholds unsafe pairs', async () => {
+    await checkAsyncFuzz(fc.asyncProperty(sku, amount, fc.boolean(), async (key, price, unsafe) => {
+      const baseline = { filename: 'store.csv', bytes: catalog(key, cents(BigInt(price))) };
+      const file = { filename: 'offer.csv', bytes: csvBytes(['SKU', 'Price'], [[key, unsafe ? 'Invalid' : cents(BigInt(price + 100))]]) };
+      const directBase = parseBaseline(baseline.bytes, baseline.filename);
+      const expected = buildPriceDiff(directBase, parseSupplier(file.bytes, file.filename).sheets[0]);
+      const run = await dispatchCli({ mode: 'price-diff', platform: 'shopify', baseline, suppliers: [{ file }], options: {} });
+      guarded(run, unsafe);
+      expect(artifact(run, 'update') ?? null).toEqual(expected.updateBytes);
+      expect(artifact(run, 'rollback') ?? null).toEqual(expected.rollbackBytes);
+      expect(JSON.parse(decodeCsv(artifact(run, 'audit')!).text).status).toBe(expected.status);
+    }), { seed: seed + 54, numRuns: 500 });
+  }, 30_000);
+
+  it('checks 450 standalone verification reports against the direct inspector', async () => {
+    await checkAsyncFuzz(fc.asyncProperty(sku, amount, fc.boolean(), async (key, price, unsafe) => {
+      const baseline = { filename: 'store.csv', bytes: catalog(key, cents(BigInt(price))) };
+      const candidate = { filename: 'candidate.csv', bytes: catalog(unsafe ? key + '0' : key, cents(BigInt(price + 100))) };
+      const direct = await inspectImport('shopify', baseline.bytes, candidate.bytes);
+      const run = await dispatchCli({ mode: 'verify', platform: 'shopify', baseline, candidate });
+      guarded(run, unsafe);
+      expect(run.status).toBe(unsafe ? 'FAIL_UNSAFE' : 'PASS');
+      expect(artifact(run, 'report')).toEqual(bytes(JSON.stringify(direct, null, 2) + '\n'));
+    }), { seed: seed + 55, numRuns: 450 });
+  }, 30_000);
+
+  it('checks 600 promotion, supplier delta and migration cases against their direct downloadable artifacts', async () => {
+    await checkAsyncFuzz(fc.asyncProperty(sku, amount, fc.boolean(), fc.constantFrom('promo', 'supplier-delta', 'migrate'),
+      async (key, price, unsafe, mode) => {
+        const baseline = { filename: 'store.csv', bytes: catalog(key, cents(BigInt(price))) };
+        if (mode === 'promo') {
+          const options: PromoCampaignOptions = { rule: { mode: 'percent-off', amount: unsafe ? '101' : '15', rounding: 'none', minimumRetail: '1' } };
+          const direct = await buildPromoCampaign('shopify', baseline.bytes, options);
+          const run = await dispatchCli({ mode, baseline, platform: 'shopify', options });
+          guarded(run, unsafe);
+          expect(artifact(run, 'audit')).toEqual(bytes(direct.auditJson));
+          expect(artifact(run, 'launch')).toEqual(direct.launchCsv === null ? undefined : bytes(direct.launchCsv));
+          expect(artifact(run, 'revert')).toEqual(direct.revertCsv === null ? undefined : bytes(direct.revertCsv));
+        } else if (mode === 'supplier-delta') {
+          const previous = { filename: 'previous.csv', bytes: csvBytes(['SKU', 'Cost'], [[key, cents(BigInt(price))]]) };
+          const next = { filename: 'next.csv', bytes: csvBytes(['SKU', 'Cost'], [[key, unsafe ? 'Invalid' : cents(BigInt(price + 100))]]) };
+          const direct = await buildSupplierDelta(previous, next);
+          const run = await dispatchCli({ mode, previous, next });
+          guarded(run, unsafe);
+          expect(artifact(run, 'audit')).toEqual(bytes(direct.auditJson));
+          expect(artifact(run, 'delta')).toEqual(direct.deltaCsv === null ? undefined : bytes(direct.deltaCsv));
+        } else {
+          const source = unsafe ? { ...baseline, bytes: catalog(key, 'Invalid') } : baseline;
+          const direct = await buildCatalogMigration('shopify', 'woocommerce', source.bytes, source.filename);
+          const run = await dispatchCli({ mode, source, sourcePlatform: 'shopify', targetPlatform: 'woocommerce' });
+          guarded(run, unsafe);
+          expect(artifact(run, 'target')).toEqual(direct.artifacts.targetCsv?.bytes);
+          expect(artifact(run, 'audit')).toEqual(direct.artifacts.auditJson.bytes);
+        }
+      }), { seed: seed + 56, numRuns: 600 });
+  }, 30_000);
+
+  it('checks 500 safe local path pairs and rejects unsafe components in both path syntaxes', () => {
+    const bad = fc.constantFrom('..', 'x.', 'report ', 'con', 'PrN.csv', 'NUL .csv', 'com1.json', 'LPT².xlsx', 'CONOUT$',
+      'name:stream', 'file\u0001', 'name\u202e.csv', 'name*', 'name?', 'name|', '<name>');
+    checkFuzz(fc.property(fc.integer({ min: 1, max: 999_999 }), bad, fc.constantFrom('D', 'z'), (id, component, drive) => {
+      const name = `دفتر-${id}.csv`;
+      expect(isSafeFileName(name)).toBe(true);
+      expect(isSafeFileName(component)).toBe(false);
+      expect(isSafeLocalPath(`${drive}:\\Données\\${name}`)).toBe(true);
+      expect(isSafeLocalPath(`/données/${name}`)).toBe(true);
+      expect(isSafeLocalPath(`./données/${name}`)).toBe(true);
+      expect(isSafeLocalPath(`${drive}:\\Données\\${component}\\${name}`)).toBe(false);
+      expect(isSafeLocalPath(`/données/${component}/${name}`)).toBe(false);
+      expect(isSafeLocalPath(`//server/share/${name}`)).toBe(false);
+      expect(isSafeLocalPath(`\\\\?\\${drive}:\\${name}`)).toBe(false);
+      expect(isSafeLocalPath(`${drive}:${name}`)).toBe(false);
+    }), { seed: seed + 57, numRuns: 500 });
+  });
+});
+
+it('accounts for all 32,720 seeded executions without skips', () => {
+  expect(fuzzExecutions).toEqual({ accepted: 32_720, discarded: 0, properties: 58 });
   console.info(`Deterministic fuzz: ${fuzzExecutions.accepted} accepted, ${fuzzExecutions.discarded} discarded across ${fuzzExecutions.properties} properties.`);
 });

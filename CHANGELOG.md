@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.8.0 (M18)
+
+- Run local repair, price comparison, candidate verification, sale campaigns, supplier deltas, and catalog migration with `repair-cli --mode` from the source checkout. Use `--out-dir` for the batch's available CSVs, JSON audits or verification reports, and offline sign-offs.
+- Use exit codes to gate the next step in a batch. Unsafe explicit runs return `2`, preserve diagnostics, and withhold CSVs. The custody manifest records the SHA-256 of each original input and emitted result. Existing `--platform` invocations keep their single-file output and audit behavior.
+- Copy a local CLI command from the workbench and use a saved supplier recipe with the current batch's files and confirmations.
+- Add seeded CLI fuzz cases for parity with the core engines, unsafe-input holds, and rejection of unsafe output names and paths.
+
 ## v1.7.0 (M17)
 
 - Attach an optional **Bundle BOM sheet** to **Build Update** for Shopify, WooCommerce, or legacy BigCommerce. Recalculate kit costs from supplier and baseline component costs, apply the confirmed retail rule, and review the projected margin and cost breakdown for nested kits up to five levels deep.

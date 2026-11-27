@@ -14,6 +14,8 @@ ImportMedic compares a Shopify, WooCommerce, or legacy BigCommerce product expor
 
 Use Node.js 24 and its bundled npm.
 
+Run `node --version` and `npm --version` first. If your shell finds an older npm on `PATH`, use the npm from your Node.js 24 installation.
+
 ```sh
 npm ci --ignore-scripts --cache .vite/npm-cache
 npm run build
@@ -157,6 +159,29 @@ Use **Download Bookkeeper Sign-Off (.html)** to open or print the standalone rep
 
 Use **SHA-256 file fingerprints** in the price workbench to compare the baseline, supplier files, optional BOM, and available update and rollback CSVs with the JSON audit or Client Sign-Off HTML. An explicit XLSX worksheet selection is recorded alongside the original whole-workbook fingerprint. The single-file repair shows the source and available repaired CSV fingerprints with the same values in its JSON audit and Bookkeeper Sign-Off HTML. Hash the original files and the downloads before resaving them in a spreadsheet editor. A digest match verifies that the file bytes match the recorded fingerprint. Keep the audit or report with the files it references.
 
+## Run a local batch from the command line
+
+From the source checkout with its locked dependencies installed, use `npm run --silent repair-cli` for a batch on your machine or in your own CI environment. The CLI reads and writes files on the filesystem and makes no network requests. Installation uses npm separately.
+
+```sh
+npm run --silent repair-cli -- --mode repair --platform xero-bank fixtures/xero-bank/balance-verified.csv --out-dir ./batches/xero-demo
+```
+
+Use a separate output directory for each run. All six explicit modes write `custody-manifest.json` alongside their available results.
+
+| Mode | Use it to prepare |
+| --- | --- |
+| `repair` | A repaired CSV, JSON audit, and offline Bookkeeper Sign-Off |
+| `price-diff` | A matched catalog update and rollback, JSON audit, and offline Client Sign-Off |
+| `verify` | A JSON inspection of a candidate CSV against its baseline, with optional matched rollback replay |
+| `promo` | Matched sale launch and revert CSVs, JSON audit, and offline campaign sign-off |
+| `supplier-delta` | A supplier review CSV, JSON audit, and offline delta sign-off |
+| `migrate` | A creation CSV, JSON audit, and offline migration sign-off |
+
+Exit `0` means the local run passed. Exit `2` means the run held the CSV or rejected the candidate and left diagnostic files. Exit `1` means an argument, input/output, or execution error. The unsigned manifest lists the SHA-256 of the original input bytes and each emitted result. Keep it with the originals and outputs to check for byte changes.
+
+Pass a saved Supplier Recipe JSON to `price-diff` with its supplier file. Review the current mapping, worksheet, and any currency or conflict settings before confirming them for this batch. For earlier single-file scripts, omitting `--mode` preserves `--platform`, the CSV stream on stdout or `--output`, and the optional `--audit` JSON. [CLI commands, options, and exit codes](docs/subsystems/cli-automation.md)
+
 ## Verify local processing
 
 1. In the browser's Network panel, select the page document and check for `connect-src 'none'`, `worker-src 'self'`, and `form-action 'none'` in its Content Security Policy. Preview serves the policy from the same `_headers` file included in the release build.
@@ -207,7 +232,7 @@ npm run build
 npm run test:e2e
 ```
 
-GitHub CI installs the locked dependencies and runs type checking, unit tests, seeded fuzz tests, and the build on pushes and pull requests. It also exports the committed public source and typechecks from that directory. The browser suite runs against the local production preview with installed Microsoft Edge. Use `npm run dev` for development or `npm run repair-cli -- --help` for the single-file CLI.
+GitHub CI installs the locked dependencies and runs type checking, unit tests, seeded fuzz tests, and the build on pushes and pull requests. It also exports the committed public source and typechecks from that directory. The browser suite runs against the local production preview with installed Microsoft Edge. Use `npm run dev` for development.
 
 For Cloudflare Pages, build into `dist/` with `SITE_URL` set to the approved HTTPS origin. The build default `https://importmedic.example` is for local use. [`LAUNCH_ROUTES`](src/web/seo/routes.ts) lists the two initial indexable URLs, `/` and `/shopify-price-update-diff`. The other 11 pages remain directly accessible with `noindex,follow`.
 

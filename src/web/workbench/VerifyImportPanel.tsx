@@ -4,6 +4,7 @@ import type { WorkbenchWorker } from '../../core/worker/client';
 import type { InspectionSummary } from '../../core/worker/protocol';
 import { BIGCOMMERCE_DEMO } from './bigCommerceDemo';
 import { CustodyFingerprints } from './CustodyFingerprints';
+import { LocalCliCommand } from './LocalCliCommand';
 import { PAGE_SIZE, Pagination, usePagination } from './Pagination';
 import type { GeneratedPairSource } from './PriceDiffWorkbench';
 import { PriceFileInput } from './PriceFileInput';
@@ -41,6 +42,7 @@ export default function VerifyImportPanel({ pairSource, buildPlatform }: { pairS
   const platform = localPlatform ?? buildPlatform;
   const baseline = local.baseline?.file;
   const candidate = local.candidate?.file;
+  const matched = usingPair ? kind === 'rollback' : Boolean(local.pairedUpdate?.file);
 
   useLayoutEffect(() => {
     if (!selectedPair || selectedPair === pairSource) return;
@@ -212,6 +214,15 @@ export default function VerifyImportPanel({ pairSource, buildPlatform }: { pairS
       }} onResume={restart} />
       <p className="sr-only" role="status">{visibleReport ? `Verification result: ${visibleReport.summary.verdict}` : ''}</p>
       {visibleReport ? <InspectionReport {...visibleReport} /> : null}
+      <LocalCliCommand mode="verify" unavailable="Fix the selected file error to prepare the command."
+        getArguments={() => !usingPair && Object.values(local).some(({ error }) => error) ? null : [
+          '--platform', usingPair ? selectedPair.platform : platform,
+          '--baseline', 'baseline.csv',
+          '--candidate', matched ? 'rollback.csv' : 'candidate.csv',
+          ...(matched ? ['--matched-update', 'matching-update.csv'] : []),
+        ]}>
+        {usingPair ? <p className="field-help">Save the generated candidate locally before running. For a rollback, also save the matching update.</p> : null}
+      </LocalCliCommand>
     </section>
   );
 }

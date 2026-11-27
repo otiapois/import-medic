@@ -1,6 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { PriceFileInput } from '../PriceFileInput';
 import { useSignoffFingerprint } from '../CustodyFingerprints';
+import { LocalCliCommand } from '../LocalCliCommand';
 import { useSignoffBranding } from '../SignoffBranding';
 import { STORE_PLATFORMS } from '../WorkspaceProfile';
 import { downloadFile } from '../downloads';
@@ -173,6 +174,9 @@ export default function CatalogMigrationPanel({ active }: { active: boolean }) {
           </div>
           {saveError ? <p className="file-message file-error" role="alert">{saveError}</p> : null}
         </section>
+        <LocalCliCommand mode="migrate" getArguments={() => [
+          '--source-platform', source, '--target-platform', target, 'source.csv',
+        ]} />
       </div>
     </div>
   );

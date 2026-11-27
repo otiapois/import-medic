@@ -123,6 +123,8 @@ export interface ReviewSource extends RecipeLoad {
   id: string;
   label: string;
   labelOverride?: string;
+  filename: string;
+  worksheet?: string;
   mapping: PriceMapping;
   headers: readonly string[];
   issues: readonly DiffIssue[];
@@ -449,10 +451,12 @@ export function PriceDiffWorkbench({ characterKeys }: { characterKeys: boolean }
     for (const id of order) {
       const { supplier, mapping, recipe, recipeErrors } = active.suppliers[id];
       if (!supplier || !mapping) return null;
-      const { headers, issues } = supplier.sheets[mapping.sheetIndex];
+      const { name, headers, issues } = supplier.sheets[mapping.sheetIndex];
       const labelOverride = labels[id]?.trim() || undefined;
       const defaults = profile && !recipe ? { ...mapping, selection: withWorkspaceDefaults(mapping.selection, profile) } : mapping;
-      sources.push({ id, label: labelOverride ?? sourceLabel(supplier.name), labelOverride, mapping: defaults, headers, issues, recipe, recipeErrors });
+      sources.push({ id, label: labelOverride ?? sourceLabel(supplier.name), labelOverride,
+        filename: supplier.name, worksheet: /\.xlsx$/i.test(supplier.name) && !mapping.sheetMissing ? name : undefined,
+        mapping: defaults, headers, issues, recipe, recipeErrors });
     }
     return sources;
   }, [active, labels, order, profile]);

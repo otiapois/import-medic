@@ -55,4 +55,6 @@ npm run test:fuzz
 npm run repair-cli -- --platform quickbooks-bank fixtures/quickbooks/amount-parentheses.csv --output repaired.csv --audit repair-audit.json
 ```
 
-The CLI runs the same engine. Its JSON audit records the same source and verified output SHA-256 fingerprints. Pass `--stripe-paypal-fee-convention` with the confirmed source convention when reopening a generic accounting report. With no output path it writes the validated CSV to stdout and the summary to stderr. Output and audit paths create new files. A result with review items returns exit code 2, including when a reviewable CSV was written. Invalid arguments and filesystem failures return exit code 1.
+The legacy CLI invocation shown here runs the same engine. Its JSON audit records the same source and verified output SHA-256 fingerprints. Pass `--stripe-paypal-fee-convention` with the confirmed source convention when reopening a generic accounting report. With no output path it writes the validated CSV to stdout and the summary to stderr. Output and audit paths create new files. A result with review items returns exit code 2, including when a reviewable CSV was written. Invalid arguments and filesystem failures return exit code 1.
+
+Use `--mode repair` with `--out-dir` for a fail-closed batch. This entry point withholds the CSV when unresolved review items return exit code 2. It writes the JSON audit, offline Bookkeeper Sign-Off, and a batch manifest for completed runs, including held runs. [Explicit repair flags and custody contract](cli-automation.md#repair)

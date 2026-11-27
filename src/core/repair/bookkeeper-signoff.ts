@@ -14,6 +14,7 @@ type Total = { units: bigint; scale: number; count: number };
 interface ReportContext {
   branding?: SignoffBrand;
   generatedAt: Date;
+  generatedAtDisplay?: string;
   detectedProvider?: string;
   options?: RepairOptions;
   custody?: RepairCustody;
@@ -119,7 +120,7 @@ ${reasons.length > rowLimit ? `<p>Showing ${rowLimit} of ${reasons.length} reaso
 </section>`;
 }
 
-export function createBookkeeperSignoffHtml(result: RepairResult, { generatedAt, detectedProvider, options, custody, branding }: ReportContext): string {
+export function createBookkeeperSignoffHtml(result: RepairResult, { generatedAt, generatedAtDisplay, detectedProvider, options, custody, branding }: ReportContext): string {
   const fourColumn = options ? options.qboLayout === '4col' : result.headers.includes('Credit');
   const target = result.platform === 'shopify-products' ? 'Shopify products' :
     result.platform === 'quickbooks-bank' ? `QuickBooks bank (${fourColumn ? '4-column' : '3-column'} target)` :
@@ -151,7 +152,7 @@ th,td{padding:6px;border:1px solid #b7cac6;text-align:left;vertical-align:top}th
 <h1>Bookkeeper Sign-Off</h1>
 <p><strong>Source file</strong> ${boundedText(result.filename)}<br><strong>Confirmed platform</strong> ${escape(target)}<br><strong>Detected source</strong> ${escape(detectedProvider ?? 'Unspecified')}<br>
 ${result.platform === 'stripe-paypal' && options?.stripePayPalOutput === 'quickbooks-3col' ? '<strong>Output layout</strong> QuickBooks 3-column bank CSV<br>' : ''}
-<strong>Generated locally</strong> <time datetime="${generatedAt.toISOString()}">${escape(generatedAt.toLocaleString())}</time></p>
+<strong>Generated locally</strong> <time datetime="${generatedAt.toISOString()}">${escape(generatedAtDisplay ?? generatedAt.toLocaleString())}</time></p>
 <p><strong>Repaired CSV</strong> ${result.canDownload ? 'Available' : 'Blocked'}</p>
 <dl class="summary">${metrics.map(([label, value]) => `<div><dt>${label}</dt><dd>${value}</dd></div>`).join('')}</dl>
 <p class="meta">Total rows include retained and excluded CSV records, after omitting the header record. Cell counts use distinct source cells. Layout, header, encoding and line-ending notices appear in the audit where applicable.</p>
