@@ -5,6 +5,8 @@ import type { CatalogImpactSummary } from '../analytics/catalog-impact';
 import type { PriceCustody, RepairCustody } from '../audit/custody';
 import type { ImportDiffRow, ImportInspection, ImportInspectionIssue } from '../verify-import/inspector';
 import type { ShopifyMarket } from '../shopify-price-diff/markets';
+import type { SignoffBrand } from '../branding/signoff-brand';
+import type { WhatIfResult, WhatIfScenario } from '../whatif/simulator';
 
 export interface WorkerProgress {
   phase: 'reading' | 'parsing' | 'repairing' | 'comparing' | 'exporting';
@@ -78,6 +80,7 @@ interface Operations {
   invalidatePrice: [Record<never, never>, undefined];
   diff: [SupplierWorksheet & DiffSettings & { label?: string; market?: string }, DiffSummary];
   diffBatch: [BatchDiffOptions & { suppliers: readonly SupplierBatchSetting[] }, DiffSummary];
+  simulatePrice: [{ scenarios: readonly WhatIfScenario[] }, WhatIfResult[]];
   diffRows: [PageRequest & { filter: DiffFilter; search: string }, WorkerPage<PricePreviewRow>];
   diffIssues: [PageRequest, WorkerPage<DiffIssue>];
   inspectImport: [{ platform: StorePlatform; baseline: File; candidate: File; pairedUpdate?: File }, InspectionSummary];
@@ -88,7 +91,7 @@ interface Operations {
   repairRows: [PageRequest, WorkerPage<RepairPreviewRow>];
   repairRemoved: [PageRequest, WorkerPage<RemovedRow>];
   repairIssues: [PageRequest & { filter: RepairIssueFilter }, WorkerPage<RepairIssue>];
-  download: [{ format: DownloadFormat }, WorkerDownload];
+  download: [{ format: DownloadFormat; branding?: SignoffBrand }, WorkerDownload];
   loadRecipe: [{ file: File }, RecipeResult<SupplierRecipe>];
   applyRecipe: [SupplierWorksheet & { recipe: SupplierRecipe }, RecipeResult<{ sheetIndex: number; selection: ColumnSelection; supplier?: SupplierMeta }>];
   saveRecipe: [SupplierWorksheet & { supplierLabel: string; storeLabel?: string; selection: ColumnSelection }, RecipeResult<WorkerDownload>];
@@ -108,7 +111,7 @@ export function invalidatesResult(request: WorkerRequest): ResultScope | undefin
 
 export function resultScope(request: WorkerRequest): ResultScope | undefined {
   switch (request.type) {
-    case 'diff': case 'diffBatch': case 'diffRows': case 'diffIssues': return 'price';
+    case 'diff': case 'diffBatch': case 'diffRows': case 'diffIssues': case 'simulatePrice': return 'price';
     case 'repair': case 'repairRows': case 'repairIssues': case 'repairRemoved': return 'repair';
     case 'inspectImport': case 'inspectionRows': case 'inspectionIssues': return 'inspection';
     case 'download': return request.format.startsWith('price-') ? 'price' : 'repair';

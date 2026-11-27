@@ -6,6 +6,7 @@ import { amountDelta, currenciesAgree, readAmount, scaled, type Amount } from '.
 import { parseSupplier } from '../shopify-price-diff/source';
 import type { DiffIssue, SupplierSheet } from '../shopify-price-diff/types';
 import { isScientific } from '../xlsx';
+import { brandSignoffHtml, type SignoffBrand } from '../branding/signoff-brand';
 import { renderSupplierDeltaSignOff } from './signoff';
 import type { SupplierDeltaInspection, SupplierDeltaIssue, SupplierDeltaMapping, SupplierDeltaResult,
   SupplierDeltaRow, SupplierDeltaSide, SupplierDeltaSource, SupplierDeltaStatus } from './types';
@@ -223,7 +224,7 @@ function toCsv(rows: readonly SupplierDeltaRow[]): string {
 }
 
 export async function buildSupplierDelta(previous: SupplierDeltaSource, next: SupplierDeltaSource,
-  mappings?: { previous?: SupplierDeltaMapping; next?: SupplierDeltaMapping }): Promise<SupplierDeltaResult> {
+  mappings?: { previous?: SupplierDeltaMapping; next?: SupplierDeltaMapping }, branding?: SignoffBrand): Promise<SupplierDeltaResult> {
   const hashes = Promise.all([sha256(previous.bytes), sha256(next.bytes)]);
   const prior = project(previous, 'previous', mappings?.previous);
   const current = project(next, 'next', mappings?.next);
@@ -275,9 +276,19 @@ export async function buildSupplierDelta(previous: SupplierDeltaSource, next: Su
   if (status === 'ready') {
     deltaCsv = toCsv(rows);
     custody.deltaCsvSha256 = await sha256(utf8.encode(deltaCsv));
-    signOffHtml = renderSupplierDeltaSignOff(sources, rows, counts, maxHikePercent, custody);
+    signOffHtml = renderSupplierDeltaSignOff(sources, rows, counts, maxHikePercent, custody, branding);
     custody.signOffHtmlSha256 = await sha256(utf8.encode(signOffHtml));
   }
   const auditJson = JSON.stringify({ version: 1, status, sources, counts, maxHikePercent, rows, issues, custody }, null, rows.length > 10_000 ? 0 : 2) + '\n';
   return { status, rows, issues, counts, maxHikePercent, deltaCsv, auditJson, signOffHtml, custody };
+}
+
+export async function brandSupplierDeltaReports(result: SupplierDeltaResult, branding?: SignoffBrand) {
+  const { signOffHtml, auditJson, custody } = result;
+  if (branding === undefined || signOffHtml === null) return { signOffHtml, auditJson, signOffHtmlSha256: custody.signOffHtmlSha256 };
+  const html = brandSignoffHtml(signOffHtml, branding);
+  const signOffHtmlSha256 = await sha256(utf8.encode(html));
+  const audit = JSON.parse(auditJson) as { custody: SupplierDeltaResult['custody'] };
+  audit.custody.signOffHtmlSha256 = signOffHtmlSha256;
+  return { signOffHtml: html, auditJson: JSON.stringify(audit, null, result.rows.length > 10_000 ? 0 : 2) + '\n', signOffHtmlSha256 };
 }

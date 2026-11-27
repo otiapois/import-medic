@@ -1,10 +1,12 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import type { ColumnSelection } from '../../core/shopify-price-diff/types';
 import {
-  createWorkspaceProfile, MAX_WORKSPACE_PROFILE_BYTES, parseWorkspaceProfile, serializeWorkspaceProfile,
+  createWorkspaceProfile, serializeWorkspaceProfile,
 } from '../../core/shopify-price-diff/workspace-profile';
 import type { StorePlatform, WorkspaceProfile } from '../../core/shopify-price-diff/workspace-profile';
 import { downloadFile } from './downloads';
+import { SignoffBrandingDrawer, useSignoffBranding } from './SignoffBranding';
+import { readWorkspaceProfileFile } from './workspaceProfileFile';
 
 export const STORE_PLATFORMS = { shopify: 'Shopify', woocommerce: 'WooCommerce', bigcommerce: 'BigCommerce' } as const satisfies Record<StorePlatform, string>;
 
@@ -44,6 +46,7 @@ export function WorkspaceProfileControls({ platform, profile, selection, onApply
   const [currencyEdit, setCurrency] = useState<string>();
   const [status, setStatus] = useState('');
   const [error, setError] = useState('');
+  const { branding, restoreBranding } = useSignoffBranding();
   const storeCurrency = currencyEdit ?? selection?.pricingRule?.fx?.storeCurrency ?? profile?.storeCurrency ?? '';
   const label = STORE_PLATFORMS[platform];
 
@@ -53,30 +56,21 @@ export function WorkspaceProfileControls({ platform, profile, selection, onApply
     const current = ++attempt.current;
     setError('');
     setStatus('');
-    if (file.size > MAX_WORKSPACE_PROFILE_BYTES) {
-      setError('The workspace profile file is too large. Choose a saved workspace profile JSON file.');
-      return;
-    }
-    let bytes: ArrayBuffer;
+    let incoming: WorkspaceProfile;
     try {
-      bytes = await file.arrayBuffer();
-    } catch {
-      if (current === attempt.current) setError('The local workspace profile could not be read.');
+      incoming = await readWorkspaceProfileFile(file);
+    } catch (error) {
+      if (current === attempt.current) setError(error instanceof Error ? error.message : 'The local workspace profile could not be read.');
       return;
     }
     if (current !== attempt.current) return;
-    const result = parseWorkspaceProfile(new Uint8Array(bytes));
-    if (!result.ok) {
-      setError(result.diagnostics.map(({ message }) => message).join(' '));
-      return;
-    }
-    const incoming = result.value;
     if (incoming.platform !== platform) {
       const incomingLabel = STORE_PLATFORMS[incoming.platform];
       setError(`This profile is for ${incomingLabel}. Select ${incomingLabel} in Store platform to use it.`);
       return;
     }
     onApply(incoming);
+    restoreBranding(incoming.branding);
     setStoreName(incoming.storeName);
     setCurrency(incoming.storeCurrency);
     setStatus(`Workspace profile loaded: ${incoming.storeName} · ${label} · ${incoming.storeCurrency}.`);
@@ -99,6 +93,7 @@ export function WorkspaceProfileControls({ platform, profile, selection, onApply
       increaseThresholdPercent: selection?.increaseThresholdPercent ?? profile?.increaseThresholdPercent ?? 200,
       inventoryDropThresholdPercent: selection?.inventoryDropThresholdPercent ?? profile?.inventoryDropThresholdPercent ?? 80,
       ...(pricingRule ? { pricingRule } : {}),
+      ...(branding ? { branding } : {}),
     });
     if (!result.ok) {
       setError(result.diagnostics.map(({ message }) => message).join(' '));
@@ -110,7 +105,9 @@ export function WorkspaceProfileControls({ platform, profile, selection, onApply
   }
 
   return (
-    <details className="workspace-profile recipe-bar" onToggle={(event) => setOpen(event.currentTarget.open)}>
+    <details className="workspace-profile recipe-bar" onToggle={(event) => {
+      if (event.target === event.currentTarget) setOpen(event.currentTarget.open);
+    }}>
       <summary>Workspace profile</summary>
       {open ? (
         <>
@@ -131,6 +128,7 @@ export function WorkspaceProfileControls({ platform, profile, selection, onApply
               <button type="submit" className="button button-secondary button-small">Save Workspace Profile (.json)</button>
             </form>
           </div>
+          <SignoffBrandingDrawer />
           {status ? <p className="field-help" role="status">{status}</p> : null}
           {error ? <p className="recipe-diagnostics" role="alert">{error}</p> : null}
         </>

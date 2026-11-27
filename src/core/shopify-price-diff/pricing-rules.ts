@@ -2,10 +2,12 @@ import { z } from 'zod';
 import { amountGreaterThan, readAmount } from './prices';
 import type { Amount } from './prices';
 
-const plainDecimal = z.string().regex(/^[+-]?(?:\d{1,64}(?:\.\d{1,64})?|\.\d{1,64})$/, 'Use a plain decimal with up to 64 digits on either side of the point.');
+const plainDecimal = z.string().regex(/^[+-]?(?:\d{1,64}(?:\.\d{1,64})?|\.\d{1,64})(?![\s\S])/, 'Use a plain decimal with up to 64 digits on either side of the point.');
 const positive = plainDecimal.refine((value) => (readAmount(value)?.units ?? 0n) > 0n, 'Enter a positive decimal.');
 const nonnegative = plainDecimal.refine((value) => (readAmount(value)?.units ?? -1n) >= 0n, 'Enter a nonnegative decimal.');
-const common = { rounding: z.enum(['none', 'ending-99', 'ending-95', 'nearest-whole']).optional(), minimumRetail: positive.optional() };
+export const minimumRetailSchema = positive;
+export const retailRoundingSchema = z.enum(['none', 'ending-99', 'ending-95', 'nearest-whole']);
+const common = { rounding: retailRoundingSchema.optional(), minimumRetail: minimumRetailSchema.optional() };
 
 export const legacyPricingRuleSchema = z.discriminatedUnion('mode', [
   z.strictObject({ ...common, mode: z.literal('direct') }),
@@ -49,7 +51,21 @@ export const tieredSettingsSchema = z.strictObject({
   }),
 });
 export const tieredPricingRuleSchema = tieredSettingsSchema.extend(extensions);
-export const pricingRuleSchema = z.discriminatedUnion('mode', [...preTierPricingRuleSchema.options, tieredPricingRuleSchema]);
+export const retailAdjustmentSchema = plainDecimal.refine((value) => {
+  const amount = readAmount(value);
+  return amount !== null && amount.units > -100n * 10n ** BigInt(amount.scale);
+}, 'Enter a percentage greater than -100.');
+const adjustmentFields = { retailAdjustmentPercent: retailAdjustmentSchema.optional() };
+const [fxDirect, fxMultiplier, fxMarkup, fxMargin] = preTierPricingRuleSchema.options;
+export const adjustablePreTierPricingRuleSchema = z.discriminatedUnion('mode', [
+  fxDirect.extend(adjustmentFields), fxMultiplier.extend(adjustmentFields),
+  fxMarkup.extend(adjustmentFields), fxMargin.extend(adjustmentFields),
+]);
+export const adjustableTieredPricingRuleSchema = tieredPricingRuleSchema.extend(adjustmentFields);
+export const pricingRuleSchema = z.discriminatedUnion('mode', [
+  ...adjustablePreTierPricingRuleSchema.options,
+  adjustableTieredPricingRuleSchema,
+]);
 
 export type PricingBracket = z.infer<typeof bracketSchema>;
 export type FxConversion = z.infer<typeof fxSchema>;
@@ -66,7 +82,8 @@ export function hasPricingInstructions(rule: PricingRule | undefined): boolean {
 }
 
 const changesRetail = (rule: PricingRule): boolean =>
-  rule.mode !== 'direct' || rule.rounding !== undefined || rule.minimumRetail !== undefined || rule.fx !== undefined;
+  rule.mode !== 'direct' || rule.rounding !== undefined || rule.minimumRetail !== undefined ||
+  rule.fx !== undefined || rule.retailAdjustmentPercent !== undefined;
 
 interface Fraction {
   numerator: bigint;
@@ -137,6 +154,10 @@ export function preparePricing(rule: PricingRule | undefined): (source: Amount) 
   if (rule === undefined || !changesRetail(rule)) return (source) => source.units > 0n ? source : null;
   const floor = rule.minimumRetail === undefined ? null : fraction(readAmount(rule.minimumRetail)!);
   const rate = rule.fx ? fraction(readAmount(rule.fx.fxRate)!) : null;
+  const adjustment = rule.retailAdjustmentPercent === undefined ? null : fraction(readAmount(rule.retailAdjustmentPercent)!);
+  const adjustmentFactor = adjustment && { numerator: 100n * adjustment.denominator + adjustment.numerator, denominator: 100n * adjustment.denominator };
+  const finish = (subtotal: Fraction, currency: string | null) =>
+    roundedAmount(adjustmentFactor ? multiply(subtotal, adjustmentFactor) : subtotal, rule.rounding, rate ? null : currency, floor);
   if (rule.mode === 'tiered-brackets') {
     const brackets = compileBrackets(rule);
     return (source) => {
@@ -144,7 +165,7 @@ export function preparePricing(rule: PricingRule | undefined): (source: Amount) 
       const cost = rate ? multiply(fraction(source), rate) : fraction(source);
       const { factor, fee, matchedTier } = brackets.find(({ cutoff }) => !cutoff || !greater(cost, cutoff))!;
       const multiplied = multiply(cost, factor);
-      const computed = roundedAmount(fee ? add(multiplied, fee) : multiplied, rule.rounding, rate ? null : source.currency, floor);
+      const computed = finish(fee ? add(multiplied, fee) : multiplied, source.currency);
       return computed && { ...computed, matchedTier };
     };
   }
@@ -167,7 +188,7 @@ export function preparePricing(rule: PricingRule | undefined): (source: Amount) 
     if (source.units <= 0n) return null;
     const multiplied = multiply(fraction(source), factor);
     const computed = fee === null ? multiplied : add(multiplied, fee);
-    return roundedAmount(computed, rule.rounding, rule.fx ? null : source.currency, floor);
+    return finish(computed, source.currency);
   };
 }
 

@@ -207,6 +207,7 @@ export interface PricingPreview {
   computedPrice: string;
   computedCompareAtPrice?: string;
   matchedTier?: string;
+  retailAdjustmentPercent?: string;
   fxApplied?: FxConversion;
 }
 

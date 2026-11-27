@@ -1,5 +1,7 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { PriceFileInput } from '../PriceFileInput';
+import { useSignoffFingerprint } from '../CustodyFingerprints';
+import { useSignoffBranding } from '../SignoffBranding';
 import { STORE_PLATFORMS } from '../WorkspaceProfile';
 import { downloadFile } from '../downloads';
 import { catalogDemo } from './demo';
@@ -17,8 +19,9 @@ const DOWNLOADS = [
   { artifact: 'signOffHtml', label: 'Migration Sign-Off (.html)' },
 ] as const;
 
-export default function CatalogMigrationPanel() {
+export default function CatalogMigrationPanel({ active }: { active: boolean }) {
   const id = useId();
+  const { branding } = useSignoffBranding();
   const currentWorker = useRef<MigrationWorker | null>(null);
   const [source, setSource] = useState<CatalogPlatform>('shopify');
   const [target, setTarget] = useState<CatalogPlatform>('woocommerce');
@@ -28,6 +31,10 @@ export default function CatalogMigrationPanel() {
   const [saveError, setSaveError] = useState('');
   const [report, setReport] = useState<{ worker: MigrationWorker; result: CatalogRun }>();
   const [saving, setSaving] = useState(false);
+  const readFingerprint = useMemo(() => active && report && branding
+    ? () => report.worker.request({ type: 'signoffFingerprint', branding }) : null, [active, report, branding]);
+  const brandedFingerprint = useSignoffFingerprint(readFingerprint);
+  const signoffFingerprint = branding ? brandedFingerprint : report?.result.custody.signOffSha256;
 
   useEffect(() => {
     if (!file) return;
@@ -95,7 +102,9 @@ export default function CatalogMigrationPanel() {
     setSaving(true);
     setSaveError('');
     try {
-      const { filename, bytes, mime } = await worker.request({ type: 'download', artifact });
+      const { filename, bytes, mime } = await worker.request({
+        type: 'download', artifact, ...(artifact !== 'targetCsv' && branding ? { branding } : {}),
+      });
       if (currentWorker.current === worker) downloadFile(filename, bytes, mime);
     } catch (error) {
       if (currentWorker.current === worker) setSaveError(error instanceof Error ? error.message : 'This migration file could not be saved.');
@@ -151,7 +160,7 @@ export default function CatalogMigrationPanel() {
       <div className="migration-review">
         <p className="delta-state" data-testid="catalog-migration-status" data-ready={ready} data-held={held} role="status">{status}</p>
         {runError ? <p className="file-message file-error" role="alert">{runError}</p> : null}
-        {report ? <MigrationResults report={report} /> : null}
+        {report ? <MigrationResults report={report} signoffFingerprint={signoffFingerprint} /> : null}
         <section className="migration-downloads" aria-label="Migration downloads">
           {result ? <p className="field-help">{ready
             ? `Review the disclosed fields and preview before manually importing the creation CSV into ${STORE_PLATFORMS[target]}.`

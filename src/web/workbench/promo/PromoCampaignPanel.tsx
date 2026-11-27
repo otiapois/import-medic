@@ -5,6 +5,7 @@ import type { GeneratedPairSource } from '../PriceDiffWorkbench';
 import { PriceFileInput } from '../PriceFileInput';
 import { STORE_PLATFORMS } from '../WorkspaceProfile';
 import { downloadFile } from '../downloads';
+import { useSignoffBranding } from '../SignoffBranding';
 import { CampaignExports, CampaignResults } from './CampaignResults';
 import { CampaignWorker } from './campaignWorker';
 import type { CampaignArtifact, CampaignSummary } from './campaignWorker';
@@ -56,6 +57,7 @@ export default function PromoCampaignPanel({ initialPlatform, onPairAvailable, o
   const id = useId();
   const reviewHeading = useRef<HTMLHeadingElement>(null);
   const activeWorker = useRef<CampaignWorker | undefined>(undefined);
+  const { branding } = useSignoffBranding();
   const [inputs, setInputs] = useState<CampaignInputs>(() => ({ ...defaultFields, platform: initialPlatform, rule: defaultRule, skipLineNumbers: [] }));
   const [completion, setCompletion] = useState<Completion>();
   const [downloadError, setDownloadError] = useState('');
@@ -177,7 +179,7 @@ export default function PromoCampaignPanel({ initialPlatform, onPairAvailable, o
     const { worker } = report;
     setDownloadError('');
     try {
-      const file = await worker.request({ type: 'download', artifact });
+      const file = await worker.request({ type: 'download', artifact, ...(artifact === 'signoff' && branding ? { branding } : {}) });
       if (activeWorker.current === worker) downloadFile(file.filename, file.bytes, file.mime);
     } catch (error) {
       if (activeWorker.current === worker) setDownloadError(error instanceof Error ? error.message : 'The download could not be prepared.');

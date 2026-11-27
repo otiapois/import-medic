@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { DiffSummary, RepairSummary } from '../../core/worker/protocol';
 
 interface Fingerprint {
@@ -6,6 +6,21 @@ interface Fingerprint {
   label: string;
   sha256?: string;
   detail?: string;
+}
+
+export function useSignoffFingerprint(read: (() => Promise<string | undefined>) | null) {
+  const [result, setResult] = useState<{ read: typeof read; sha256?: string }>();
+  useEffect(() => {
+    if (!read) return;
+    let current = true;
+    void read().then((sha256) => {
+      if (current) setResult({ read, sha256 });
+    }, () => {
+      if (current) setResult({ read });
+    });
+    return () => { current = false; };
+  }, [read]);
+  return result?.read === read ? result.sha256 : undefined;
 }
 
 export function PriceFingerprints({ custody, ready }: { custody: DiffSummary['custody']; ready: boolean }) {

@@ -1,3 +1,4 @@
+import { brandSignoffHtml, type SignoffBrand } from '../branding/signoff-brand';
 import { cellValue } from './types';
 import { bigNameHeader } from '../bigcommerce-price-diff/source';
 import type { Baseline, DiffIssue, DiffRow, PriceDiffResult } from './types';
@@ -41,6 +42,7 @@ function pricingDescription(rule?: PricingRule): string {
   else if (rule?.mode === 'tiered-brackets') details.push(`Tiered cost brackets (${rule.brackets.length})`);
   else if (rule?.mode === 'target-margin') details.push(`Target margin ${rule.marginPercent}%`);
   else details.push('Direct supplier price');
+  if (rule?.retailAdjustmentPercent !== undefined) details.push(`Retail adjustment ${rule.retailAdjustmentPercent}%`);
   if (rule?.rounding) details.push({
     none: 'Cent rounding', 'ending-99': '.99 ending', 'ending-95': '.95 ending', 'nearest-whole': 'Whole-unit rounding',
   }[rule.rounding]);
@@ -84,7 +86,7 @@ ${watchlist.length ? `<table><thead><tr><th scope="col">SKU / handle</th><th sco
 export function createSignoffHtml(
   baseline: Baseline, result: Pick<PriceDiffResult, 'rows' | 'canDownload' | 'rollbackVerification'> &
     Partial<Pick<PriceDiffResult, 'supplierPricing' | 'conflictCount' | 'conflictPolicy' | 'inventoryEnabled' | 'issues' | 'market'>>,
-  rule?: PricingRule, cached?: CachedImpact, custody?: PriceCustody,
+  rule?: PricingRule, cached?: CachedImpact, custody?: PriceCustody, branding?: SignoffBrand,
 ): string {
   const woo = baseline.platform === 'woocommerce';
   const bigcommerce = baseline.platform === 'bigcommerce';
@@ -146,7 +148,7 @@ ${row.supplierContenders?.slice(0, contenderLimit).map(({ label, filename, works
     `<span class="supplier-detail">${cell(label)} · ${sourceLocation(filename, worksheet, row)} · ${cell(priceColumn)}: ${cell(price)}${inventoryColumn ? ` · ${cell(inventoryColumn)}: ${cell(inventoryQty)}` : ''}${compareAtColumn ? ` · ${cell(compareAtColumn)}: ${cell(compareAtPrice)}` : ''}</span>`).join('') ?? ''}${row.supplierContenders && row.supplierContenders.length > contenderLimit ? `<span class="supplier-detail">${row.supplierContenders.length - contenderLimit} more supplier rows in the full audit.</span>` : ''}</td>` : ''}
 ${showTiers ? `<td>${cell(row.matchedTier)}</td>` : ''}<td>${escape(row.status)}</td></tr>`;
   });
-  return `<!doctype html>
+  return brandSignoffHtml(`<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -191,5 +193,5 @@ ${custody ? custodyFooter([
   ]) : ''}
 </main></body>
 </html>
-`;
+`, branding);
 }

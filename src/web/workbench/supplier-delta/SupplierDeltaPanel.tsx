@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { PriceFileInput } from '../PriceFileInput';
 import { downloadFile } from '../downloads';
+import { useSignoffFingerprint } from '../CustodyFingerprints';
+import { useSignoffBranding } from '../SignoffBranding';
 import { DeltaWorker } from './deltaWorker';
 import type { DeltaArtifact, DeltaInspection, DeltaMapping, DeltaSide, DeltaSummary } from './deltaWorker';
 import { DeltaResults } from './DeltaResults';
@@ -127,8 +129,9 @@ function DeltaSourcePicker({ side, selection }: { side: DeltaSide; selection: Re
   );
 }
 
-export default function SupplierDeltaPanel() {
+export default function SupplierDeltaPanel({ active }: { active: boolean }) {
   const heading = useId();
+  const { branding } = useSignoffBranding();
   const workerRef = useRef<DeltaWorker | null>(null);
   const change = useRef(0);
   const comparisonId = useRef(0);
@@ -157,6 +160,12 @@ export default function SupplierDeltaPanel() {
   const [checked, setChecked] = useState<{ inputs: NonNullable<typeof inputs>; report?: { summary: DeltaSummary; id: number; worker: DeltaWorker }; error?: string }>();
   const current = checked?.inputs === inputs ? checked : undefined;
   const report = current?.report;
+  const ready = report?.summary.status === 'ready';
+  const readFingerprint = useMemo(() => active && ready && report && branding
+    ? () => report.worker.request({ type: 'signoffFingerprint', comparisonId: report.id, branding }) : null,
+  [active, ready, report, branding]);
+  const brandedFingerprint = useSignoffFingerprint(readFingerprint);
+  const signoffFingerprint = branding ? brandedFingerprint : report?.summary.custody.signOffHtmlSha256;
 
   useEffect(() => () => {
     change.current += 1;
@@ -203,7 +212,9 @@ export default function SupplierDeltaPanel() {
     setDownloading(true);
     setDownloadError('');
     try {
-      const { filename, bytes, mime } = await report.worker.request({ type: 'download', comparisonId: report.id, artifact });
+      const { filename, bytes, mime } = await report.worker.request({
+        type: 'download', comparisonId: report.id, artifact, ...(artifact !== 'csv' && branding ? { branding } : {}),
+      });
       if (change.current === revision) downloadFile(filename, bytes, mime);
     } catch (error) {
       if (change.current === revision) setDownloadError(errorMessage(error, 'This supplier delta report could not be saved.'));
@@ -212,7 +223,6 @@ export default function SupplierDeltaPanel() {
     }
   }
 
-  const ready = report?.summary.status === 'ready';
   const status = current?.error ? 'Comparison stopped' : ready ? 'Ready to download' : report ? 'Review required' :
     inputs ? 'Comparing supplier costs…' : previous.reading || next.reading ? 'Reading supplier files…' : 'Choose two supplier files';
 
@@ -241,7 +251,7 @@ export default function SupplierDeltaPanel() {
           role="status" aria-live="polite">{status}</p>
         {current?.error ? <p className="file-message file-error" role="alert">{current.error}</p> : null}
         {report && previous.source && next.source ? (
-          <DeltaResults key={report.id} report={report}
+          <DeltaResults key={report.id} report={report} signoffFingerprint={signoffFingerprint}
             previous={{ file: previous.source.file, sheetName: previous.inspection?.selectedSheet }}
             next={{ file: next.source.file, sheetName: next.inspection?.selectedSheet }} />
         ) : null}

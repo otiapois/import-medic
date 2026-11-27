@@ -1,3 +1,4 @@
+import { brandSignoffHtml, type SignoffBrand } from '../branding/signoff-brand';
 import type { RepairCustody } from '../audit/custody';
 import { custodyFooter, escapeReportText as escape, offlineReportCsp } from '../report-html';
 import type { BalanceChain, BookkeeperAmountRow, RepairOptions, RepairResult } from '../types';
@@ -11,6 +12,7 @@ type MoneyField = typeof currencyFields[number];
 type Total = { units: bigint; scale: number; count: number };
 
 interface ReportContext {
+  branding?: SignoffBrand;
   generatedAt: Date;
   detectedProvider?: string;
   options?: RepairOptions;
@@ -117,7 +119,7 @@ ${reasons.length > rowLimit ? `<p>Showing ${rowLimit} of ${reasons.length} reaso
 </section>`;
 }
 
-export function createBookkeeperSignoffHtml(result: RepairResult, { generatedAt, detectedProvider, options, custody }: ReportContext): string {
+export function createBookkeeperSignoffHtml(result: RepairResult, { generatedAt, detectedProvider, options, custody, branding }: ReportContext): string {
   const fourColumn = options ? options.qboLayout === '4col' : result.headers.includes('Credit');
   const target = result.platform === 'shopify-products' ? 'Shopify products' :
     result.platform === 'quickbooks-bank' ? `QuickBooks bank (${fourColumn ? '4-column' : '3-column'} target)` :
@@ -134,7 +136,7 @@ export function createBookkeeperSignoffHtml(result: RepairResult, { generatedAt,
     ['Total rows', result.rows.length + excludedCount], ['Auto-fixed cells', fixedCount],
     ['Manually edited cells', editedCount], ['Blocked / flagged lines', flaggedCount], ['Excluded memo / non-transaction rows', excludedCount],
   ] as const;
-  return `<!doctype html>
+  return brandSignoffHtml(`<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="${offlineReportCsp}">
 <title>Bookkeeper Sign-Off</title>
@@ -170,5 +172,5 @@ ${result.freshBooksTaxes.slice(0, rowLimit).map(({ row, name, amount }) => `<tr>
 </tbody></table>${result.freshBooksTaxes.length > rowLimit ? `<p>Showing ${rowLimit} of ${result.freshBooksTaxes.length} lines. Download the full repair audit for every line.</p>` : ''}</section>` : ''}
 ${custody ? custodyFooter([['Source CSV', custody.sourceSha256], ['Repaired CSV', result.canDownload ? custody.repairedCsvSha256 : undefined]]) : ''}
 </main></body></html>
-`;
+`, branding);
 }

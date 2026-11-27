@@ -1,3 +1,4 @@
+import { brandSignoffHtml, type SignoffBrand } from '../branding/signoff-brand';
 import { custodyFooter, escapeReportText, offlineReportCsp } from '../report-html';
 import type { SupplierDeltaCustody, SupplierDeltaResult, SupplierDeltaRow, SupplierDeltaSourceDetails } from './types';
 
@@ -17,7 +18,7 @@ const sourceLabel = ({ filename, selectedSheet }: SupplierDeltaSourceDetails): s
 
 export function renderSupplierDeltaSignOff(
   sources: { previous: SupplierDeltaSourceDetails; next: SupplierDeltaSourceDetails }, rows: readonly SupplierDeltaRow[],
-  counts: SupplierDeltaResult['counts'], maxHikePercent: string | null, custody: SupplierDeltaCustody,
+  counts: SupplierDeltaResult['counts'], maxHikePercent: string | null, custody: SupplierDeltaCustody, branding?: SignoffBrand,
 ): string {
   const hikes = rows.flatMap((row) => row.status === 'cost-increased' ? [{ row, percent: percentUnits(row.deltaPercent) }] : []);
   hikes.sort((a, b) => {
@@ -35,7 +36,7 @@ export function renderSupplierDeltaSignOff(
     ['Cost hikes', counts['cost-increased']], ['Cost drops', counts['cost-decreased']],
     ['Max hike', maxHikePercent === null ? '\u2014' : maxHikePercent + '%'],
   ];
-  return `<!doctype html>
+  return brandSignoffHtml(`<!doctype html>
 <html lang="en">
 <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="${offlineReportCsp}"><title>Supplier Delta Executive Sign-Off</title>
@@ -62,5 +63,5 @@ ${hikes.length ? `<p>${hikes.length > detailLimit ? 'Showing the first ' + detai
     '<p>No cost hikes were found.</p>'}</section></main>
 ${custodyFooter([['Previous supplier source', custody.previousSha256], ['New supplier source', custody.newSha256], ['Supplier Delta CSV', custody.deltaCsvSha256]])}
 </body></html>
-`;
+`, branding);
 }

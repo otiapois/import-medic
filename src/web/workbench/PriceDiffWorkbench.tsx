@@ -583,7 +583,7 @@ export function PriceDiffWorkbench({ characterKeys }: { characterKeys: boolean }
             <PriceDiffReview key={profileRevision} platform={platform} workspaceCurrency={profile?.storeCurrency} session={session} worker={validWorker && !paused ? prepared?.worker ?? null : null}
               sources={reviewSources} baselineIssues={active?.baseline?.issues ?? []} drafts={drafts} setDrafts={setDrafts}
               baselineFile={baselineFile?.file} onPairAvailable={setBuildPair} characterKeys={characterKeys}
-              market={market} targetChanged={targetChanged} targetSelector={targetSelector}
+              market={market} targetChanged={targetChanged} targetSelector={targetSelector} active={mode === 'build'}
               onRecipe={(supplierId, file) => updateSupplier(supplierId, { recipeFile: file ?? undefined, sheetChoice: undefined }, false)} />
           </Suspense>
         ) : null}
@@ -608,7 +608,7 @@ export function PriceDiffWorkbench({ characterKeys }: { characterKeys: boolean }
         className="workbench-input price-studio-pane" hidden={mode !== 'delta'}>
         {deltaVisited ? (
           <Suspense fallback={<p className="price-section" role="status">Opening Supplier Delta…</p>}>
-            <SupplierDeltaPanel />
+            <SupplierDeltaPanel active={mode === 'delta'} />
           </Suspense>
         ) : null}
       </div>
@@ -616,7 +616,7 @@ export function PriceDiffWorkbench({ characterKeys }: { characterKeys: boolean }
         className="workbench-input price-studio-pane" hidden={mode !== 'migrate'}>
         {migrationVisited ? (
           <Suspense fallback={<p className="price-section" role="status">Opening Catalog Migration…</p>}>
-            <CatalogMigrationPanel />
+            <CatalogMigrationPanel active={mode === 'migrate'} />
           </Suspense>
         ) : null}
       </div>

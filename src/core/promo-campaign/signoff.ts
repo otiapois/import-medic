@@ -1,3 +1,4 @@
+import { brandSignoffHtml, type SignoffBrand } from '../branding/signoff-brand';
 import { custodyFooter, escapeReportText, offlineReportCsp } from '../report-html';
 import type { PromoCampaignCustody, PromoCampaignRow, PromoCampaignSummary } from './types';
 
@@ -9,7 +10,7 @@ const text = (value: string | number | null) => {
 };
 
 export function promoSignoff(storeLabel: string, platform: string, summary: PromoCampaignSummary, rows: readonly PromoCampaignRow[],
-  custody: PromoCampaignCustody): string {
+  custody: PromoCampaignCustody, branding?: SignoffBrand): string {
   const warnings = rows.filter(({ issues }) => issues.some(({ severity }) => severity === 'warning'));
   const detail = [...warnings, ...rows.filter(({ status, issues }) => status === 'changed' && !issues.length)].slice(0, detailLimit);
   const statistics = [
@@ -20,7 +21,7 @@ export function promoSignoff(storeLabel: string, platform: string, summary: Prom
   const body = detail.map((row) => '<tr>' + [row.line, row.sku, row.product, row.status, row.beforePrice, row.promoPrice, row.revertPrice,
     row.minimumRetail, row.cost, row.costMargin, row.issues.map(({ message }) => message).join(' ')].map((value) => '<td>' + text(value) + '</td>').join('') + '</tr>').join('');
   const headings = ['Line', 'SKU', 'Product', 'Status', 'Before', 'Promo', 'Revert', 'Minimum retail', 'Cost', 'Price less cost', 'Review'];
-  return `<!doctype html>
+  return brandSignoffHtml(`<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta http-equiv="Content-Security-Policy" content="${offlineReportCsp}">
 <title>Promo Campaign Sign-Off</title><style>
 :root{color-scheme:light;font:15px system-ui,sans-serif;color:#17242f;background:#fff}
@@ -51,5 +52,5 @@ td:is(:nth-child(2),:nth-child(3),:last-child){white-space:normal;overflow-wrap:
 </style></head><body><header><h1>Promo Campaign Sign-Off</h1><p>${text(storeLabel)} · ${text(platform)}</p></header><main><dl>${statistics}</dl>
 <p>The Launch and Revert CSVs passed local replay against the uploaded catalog with zero residual differences. Import both files manually into the same store. Before reverting, check for edits made after launch.</p>
 <h2 id="review-heading">Floor and margin review</h2><p>Shows up to ${detailLimit} rows, with warnings first. The JSON audit contains the full review.</p><div class="table" role="region" aria-labelledby="review-heading" tabindex="0"><table><thead><tr>${headings.map((label) => '<th scope="col">' + label + '</th>').join('')}</tr></thead><tbody>${body}</tbody></table></div></main>
-${custodyFooter([['Baseline CSV', custody.baselineSha256], ['Promo Launch CSV', custody.launchSha256 ?? undefined], ['Promo End Revert CSV', custody.revertSha256 ?? undefined], ['Cost sheet', custody.costSheetSha256]])}</body></html>\n`;
+${custodyFooter([['Baseline CSV', custody.baselineSha256], ['Promo Launch CSV', custody.launchSha256 ?? undefined], ['Promo End Revert CSV', custody.revertSha256 ?? undefined], ['Cost sheet', custody.costSheetSha256]])}</body></html>\n`, branding);
 }

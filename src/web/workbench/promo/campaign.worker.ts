@@ -1,3 +1,4 @@
+import { brandSignoffHtml } from '../../../core/branding/signoff-brand';
 import { buildPromoCampaign } from '../../../core/promo-campaign/engine';
 import type { PromoCampaign, PromoCampaignIssue, PromoCampaignRow } from '../../../core/promo-campaign/types';
 import type { CampaignArtifact, CampaignMessage, CampaignReply, CampaignSummary } from './campaignWorker';
@@ -60,7 +61,7 @@ scope.onmessage = async ({ data: { id, request } }) => {
     if (content === null || (!campaign.canExport && (artifact === 'launch' || artifact === 'revert'))) {
       throw new Error('This campaign file is held. Review the current preview.');
     }
-    const bytes = new TextEncoder().encode(content).buffer;
+    const bytes = new TextEncoder().encode(artifact === 'signoff' ? brandSignoffHtml(content, request.branding) : content).buffer;
     scope.postMessage({ id, value: { bytes, filename: campaign.fileNames[artifact], mime: mimeTypes[artifact] } }, [bytes]);
   } catch (error) {
     scope.postMessage({ id, error: error instanceof Error ? error.message : 'The campaign preview could not finish.' });

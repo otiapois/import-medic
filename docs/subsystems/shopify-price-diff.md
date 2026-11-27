@@ -45,6 +45,16 @@ Gross margin uses `(effective retail - landed cost) / effective retail`, with a 
 
 When inventory mapping is active, the summary reports comparable quantities before and after, their difference, and the count of rows moving from positive stock to zero. Excluded proposals retain their known baseline quantities.
 
+## Margin what-if simulator
+
+[`simulatePriceScenarios`](../../src/core/whatif/simulator.ts) compares up to six distinct scenarios against the same baseline and current single- or multi-supplier setup. It keeps the join, selected price scope, conflict policy, and row resolutions and runs the same native comparison and CSV replay as **Build Update**. A scenario can compound a percentage into the active retail formula before the floor and rounding, multiply an existing confirmed FX rate, or replace the rounding or floor. Source costs use the scenario's FX rate. Manual row overrides still specify final amounts.
+
+`changedSkuCount` counts rows marked Updated by the comparison. `totalRetailDeltaCents` is the sum of proposed effective retail minus baseline effective retail over those rows, as an exact integer string in cents. It is unavailable if an updated row lacks a comparable cent-exact amount, or if the scenario is held. WooCommerce and BigCommerce use the sale price when present. `averageMarginPercent` averages equally across eligible matched rows with known landed cost and positive effective retail, to six decimal places. The result also includes the known-margin count, strictly negative-margin count, count of eligible rows below the selected supplier's floor, and the lowest-margin SKU or row identifier.
+
+Previewing leaves the active batch intact. **Apply Scenario** takes the previewed supplier rules for an eligible changed scenario and reruns the active comparison. Held results and rules with no native update remain unavailable to apply. Check the proposed prices, current file fingerprints, and verified native pair in the same review used for other pricing changes.
+
+Saving an applied percentage adjustment in a supplier recipe retains `retailAdjustmentPercent` in v4 for regular rules, v5 for tiered rules, or v6 for named worksheets. On the next batch, reconfirm any saved FX rate as usual.
+
 ## Compare-at pricing
 
 Choose a mapped supplier compare-at column or `pricingRule.compareAtRule` with a decimal `multiplier`. A mapped amount is used directly when FX is off. With FX on, the engine converts that source amount at the same rate and rounds half up to cents. An absent or blank supplier cell retains the baseline value. An automatic rule multiplies the final retail price by its factor and applies the retail rounding setting without the minimum retail floor. This uses the overridden retail price when a row has a retail override. Compare-at overrides are final store-currency amounts.

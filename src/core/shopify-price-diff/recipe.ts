@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { defaultDropPercent, defaultIncreasePercent } from './mapping';
-import { hasPricingInstructions, legacyPricingRuleSchema, preTierPricingRuleSchema, pricingRuleSchema, tieredPricingRuleSchema, validatePricingRule } from './pricing-rules';
+import { adjustablePreTierPricingRuleSchema, adjustableTieredPricingRuleSchema, hasPricingInstructions, legacyPricingRuleSchema, preTierPricingRuleSchema, pricingRuleSchema, validatePricingRule } from './pricing-rules';
 import { hasDuplicateKeys, profileText, thresholds } from './settings-validation';
 import { conflictPolicies } from './types';
 import type { ColumnSelection, SupplierFile } from './types';
@@ -29,8 +29,8 @@ const recipeSchema = z.discriminatedUnion('version', [
   z.strictObject({ version: z.literal(1), ...recipeFields }),
   z.strictObject({ version: z.literal(2), ...recipeFields, pricingRule: legacyPricingRuleSchema, storeLabel: profileText(120).optional() }),
   z.strictObject({ version: z.literal(3), ...recipeFields, ...modernPricing }),
-  z.strictObject({ version: z.literal(4), ...recipeFields, ...modernPricing, ...batchSettings }),
-  z.strictObject({ version: z.literal(5), ...recipeFields, ...modernPricing, ...batchSettings, pricingRule: tieredPricingRuleSchema }),
+  z.strictObject({ version: z.literal(4), ...recipeFields, ...modernPricing, ...batchSettings, pricingRule: adjustablePreTierPricingRuleSchema }),
+  z.strictObject({ version: z.literal(5), ...recipeFields, ...modernPricing, ...batchSettings, pricingRule: adjustableTieredPricingRuleSchema }),
   z.strictObject({ version: z.literal(6), ...recipeFields, ...modernPricing, ...batchSettings, pricingRule: pricingRuleSchema,
     sheetName: profileText(128), selectedSheet: profileText(128) }),
 ]);
@@ -105,20 +105,22 @@ export function createSupplierRecipe(
   const rule = selection.pricingRule;
   const pricingError = validatePricingRule(rule);
   if (pricingError) return failure('invalid-pricing-rule', pricingError);
-  const { fx, compareAtRule, ...legacy } = rule ?? { mode: 'direct' };
+  const { retailAdjustmentPercent, ...withoutAdjustment } = rule ?? { mode: 'direct' };
+  const { fx, compareAtRule, ...legacy } = withoutAdjustment;
   const label = storeLabel?.trim();
   const store = label ? { storeLabel: label } : {};
   const selected = (index: number | null | undefined) => index == null ? undefined : headers[index];
   const inventory = selected(selection.inventoryColumn);
   if (selection.inventoryColumn != null && inventory === undefined) return failure('invalid-inventory-column', 'Choose an available inventory quantity column before saving the recipe.');
-  const useBatchSettings = rule?.mode === 'tiered-brackets' || selection.inventoryColumn != null || selection.conflictPolicy !== undefined;
+  const useBatchSettings = rule?.mode === 'tiered-brackets' || retailAdjustmentPercent !== undefined ||
+    selection.inventoryColumn != null || selection.conflictPolicy !== undefined;
   const pricingFields = useBatchSettings || options
     ? { ...(options ? { version: 6, selectedSheet: options.selectedSheet } : { version: rule?.mode === 'tiered-brackets' ? 5 : 4 }), pricingRule: rule ?? { mode: 'direct' }, ...store, ...(fx ? { fxRateNeedsRecheck: true } : {}),
       ...(inventory === undefined ? {} : { inventoryColumn: inventory }),
       ...(inventory !== undefined && selection.inventoryDropThresholdPercent !== undefined ? { inventoryDropThresholdPercent: selection.inventoryDropThresholdPercent } : {}),
       ...(selection.conflictPolicy === undefined ? {} : { conflictPolicy: selection.conflictPolicy }) }
     : fx || compareAtRule
-    ? { version: 3, pricingRule: rule, ...store, ...(fx ? { fxRateNeedsRecheck: true } : {}) }
+    ? { version: 3, pricingRule: withoutAdjustment, ...store, ...(fx ? { fxRateNeedsRecheck: true } : {}) }
     : hasPricingInstructions(rule) || label
       ? { version: 2, pricingRule: legacy, ...store }
       : { version: 1 };

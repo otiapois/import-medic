@@ -71,7 +71,8 @@ function DeltaRowView({ row }: { row: DeltaRow }) {
   );
 }
 
-export function DeltaResults({ report, previous, next }: {
+export function DeltaResults({ report, previous, next, signoffFingerprint }: {
+  signoffFingerprint?: string;
   report: { summary: DeltaSummary; id: number; worker: DeltaWorker };
   previous: { file: File; sheetName?: string | null };
   next: { file: File; sheetName?: string | null };
@@ -144,7 +145,7 @@ export function DeltaResults({ report, previous, next }: {
         { field: 'previous', label: 'Previous supplier sheet', sha256: custody.previousSha256, detail: previous.sheetName ? `${previous.file.name} · ${previous.sheetName}` : previous.file.name },
         { field: 'new', label: 'New supplier sheet', sha256: custody.newSha256, detail: next.sheetName ? `${next.file.name} · ${next.sheetName}` : next.file.name },
         { field: 'delta-csv', label: 'Supplier Delta CSV', sha256: status === 'ready' ? custody.deltaCsvSha256 : undefined },
-        { field: 'signoff', label: 'Delta Sign-Off HTML', sha256: status === 'ready' ? custody.signOffHtmlSha256 : undefined },
+        { field: 'signoff', label: 'Delta Sign-Off HTML', sha256: status === 'ready' ? signoffFingerprint : undefined },
       ]} />
     </>
   );

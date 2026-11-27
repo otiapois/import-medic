@@ -1,4 +1,4 @@
-import { Fragment, memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, lazy, memo, Suspense, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { Dispatch, ReactNode, SetStateAction } from 'react';
 import { hasPricingInstructions, validatePricingRule } from '../../core/shopify-price-diff/pricing-rules';
 import type { ColumnSelection, ColumnSuggestions, ConflictPolicy, DiffIssue, DiffRow, RowResolution } from '../../core/shopify-price-diff/types';
@@ -6,6 +6,7 @@ import type { ShopifyMarket } from '../../core/shopify-price-diff/markets';
 import type { StorePlatform } from '../../core/shopify-price-diff/workspace-profile';
 import type { WorkbenchWorker } from '../../core/worker/client';
 import type { DiffFilter, DiffSummary, DownloadFormat, PricePreviewRow } from '../../core/worker/protocol';
+import type { WhatIfResult, WhatIfScenario } from '../../core/whatif/simulator';
 import { BatchImpact } from './BatchImpact';
 import { PriceFingerprints } from './CustodyFingerprints';
 import { downloadFile, FormulaGuard } from './downloads';
@@ -14,11 +15,14 @@ import { DiffIssueList, PriceDiffIssues } from './PriceDiffIssues';
 import type { GeneratedPairSource, MappingDrafts, ReviewSource } from './PriceDiffWorkbench';
 import { formatPriceChange } from './priceDisplay';
 import { PricingFormula } from './PricingFormula';
+import { useSignoffBranding } from './SignoffBranding';
 import { SupplierRecipeBar } from './supplierRecipe';
 import type { MappingField } from './supplierRecipe';
 import { useWorkerPage } from './useWorkerPage';
 import type { useWorkerSession } from './workerSession';
 import { STORE_PLATFORMS } from './WorkspaceProfile';
+
+const MarginWhatIf = lazy(() => import('./MarginWhatIf'));
 
 const FILTERS = [
   { id: 'all', label: 'All rows' },
@@ -55,7 +59,7 @@ const NO_ROW_DECISIONS: RowDecisions = {};
 type RowSettings = { compareAt: boolean; inventory: boolean; storeCurrency?: string };
 
 export function PriceDiffReview({ platform, workspaceCurrency, session, worker, sources, baselineIssues, drafts, setDrafts, onRecipe,
-  baselineFile, onPairAvailable, characterKeys, market, targetChanged, targetSelector }: {
+  baselineFile, onPairAvailable, characterKeys, market, targetChanged, targetSelector, active }: {
   platform: StorePlatform;
   workspaceCurrency?: string;
   session: ReturnType<typeof useWorkerSession>;
@@ -71,14 +75,17 @@ export function PriceDiffReview({ platform, workspaceCurrency, session, worker, 
   market?: ShopifyMarket;
   targetChanged: boolean;
   targetSelector: ReactNode;
+  active: boolean;
 }) {
   const id = useId();
+  const { branding } = useSignoffBranding();
   const catalog = platform !== 'shopify';
   const platformLabel = STORE_PLATFORMS[platform];
   const { run, invalidate, progress, paused } = session;
   const [policyChoice, setPolicyChoice] = useState<ConflictPolicy>();
   const [notice, setNotice] = useState('');
   const [saveErrors, setSaveErrors] = useState<Record<string, string[]>>({});
+  const [whatIfOpen, setWhatIfOpen] = useState(false);
   const multiple = sources.length > 1;
   const settings = useMemo(() => sources.map((source) => {
     const { id, mapping } = source;
@@ -130,10 +137,15 @@ export function PriceDiffReview({ platform, workspaceCurrency, session, worker, 
   const conflictPolicy = policyChoice ?? (restoredPolicies.size === 1 ? [...restoredPolicies][0] : 'block-conflicts');
   const configuration = useMemo(() => ({ settings, conflictPolicy }), [settings, conflictPolicy]);
   const decisionContext = useMemo(() => ({ sources, conflictPolicy, market }), [sources, conflictPolicy, market]);
-  const [confirmedPolicy, setConfirmedPolicy] = useState<typeof configuration | null>(null);
+  const [confirmedPolicy, setConfirmedPolicy] = useState<{
+    configuration?: typeof configuration;
+    scenario?: { context: typeof decisionContext; drafts: MappingDrafts };
+  } | null>(null);
   const [rowDecisions, setRowDecisions] = useState<{ context: typeof decisionContext; bySupplier: SupplierDecisions } | null>(null);
   const resolutions = rowDecisions?.context === decisionContext ? rowDecisions.bySupplier : NO_DECISIONS;
-  const conflictPolicyConfirmed = confirmedPolicy === configuration;
+  const approvedScenario = confirmedPolicy?.scenario;
+  const conflictPolicyConfirmed = confirmedPolicy?.configuration === configuration ||
+    (approvedScenario?.drafts === drafts && approvedScenario.context === decisionContext);
   const preparedInputs = useMemo(() => ({ configuration, resolutions, conflictPolicyConfirmed, worker }),
     [configuration, resolutions, conflictPolicyConfirmed, worker]);
   const [report, setReport] = useState<{ summary: DiffSummary; worker: WorkbenchWorker; inputs: typeof preparedInputs } | null>(null);
@@ -147,6 +159,10 @@ export function PriceDiffReview({ platform, workspaceCurrency, session, worker, 
   const overlapCount = (market || targetChanged ? summary : report?.summary)?.overlapCount ?? 0;
   const policyPending = multiple && overlapCount > 0 && conflictPolicy !== 'block-conflicts' && !conflictPolicyConfirmed;
   const ready = nativePairReady(summary) && !policyPending;
+  const scenarioReport = active && whatIfOpen && allConfirmed && summary && !summary.mappingBlocked && !policyPending ? report : null;
+  const compareScenarios = useMemo(() => scenarioReport
+    ? (scenarios: WhatIfScenario[]) => scenarioReport.worker.request({ type: 'simulatePrice', scenarios })
+    : null, [scenarioReport]);
   const inventory = settings.some((item) => item.inventory);
   const pairSource = useMemo((): GeneratedPairSource | null => {
     if (!ready || !summary || !worker || !baselineFile) return null;
@@ -255,10 +271,28 @@ export function PriceDiffReview({ platform, workspaceCurrency, session, worker, 
   function download(format: PriceDownload) {
     if (busy || !summary || ((format === 'price-csv' || format === 'price-rollback-csv') && !ready)) return;
     void run(
-      ({ worker, progress: update }) => worker.request({ type: 'download', format }, update),
+      ({ worker, progress: update }) => worker.request({
+        type: 'download', format, ...(format === 'price-signoff-html' && branding ? { branding } : {}),
+      }, update),
       ({ filename, bytes, mime }) => downloadFile(filename, bytes, mime),
       'exporting',
     );
+  }
+
+  function applyScenario(result: WhatIfResult, label: string) {
+    if (!scenarioReport || scenarioReport.inputs !== preparedInputs || busy || !result.canApply) return false;
+    const rules = new Map(result.suppliers.map(({ supplierId, pricingRule }) => [supplierId, pricingRule]));
+    const nextDrafts = Object.fromEntries(settings.map(({ source, draftSelection, draftUnresolved, remapped }) => {
+      const rule = rules.get(source.id);
+      const compareAtRule = market && !market.compareAtHeader ? draftSelection.pricingRule?.compareAtRule : undefined;
+      const pricingRule = compareAtRule ? { ...(rule ?? { mode: 'direct' }), compareAtRule } : rule;
+      return [source.id, { selection: { ...draftSelection, pricingRule }, unresolved: draftUnresolved, remapped }];
+    })) satisfies MappingDrafts;
+    invalidate();
+    if (conflictPolicyConfirmed) setConfirmedPolicy({ scenario: { context: decisionContext, drafts: nextDrafts } });
+    setDrafts(nextDrafts);
+    setNotice(`Applied ${label} to the update. Rebuilding the price diff.`);
+    return true;
   }
 
   return (
@@ -340,7 +374,7 @@ export function PriceDiffReview({ platform, workspaceCurrency, session, worker, 
                 disabled={busy || !summary?.overlapCount || !allConfirmed || summary.mappingBlocked}
                 onClick={() => {
                   invalidate();
-                  setConfirmedPolicy(configuration);
+                  setConfirmedPolicy({ configuration });
                   setNotice('Supplier conflict policy confirmed for this batch.');
                 }}>Confirm supplier conflict policy</button>
             ) : null}
@@ -369,6 +403,16 @@ export function PriceDiffReview({ platform, workspaceCurrency, session, worker, 
             activeFormula={settings.some(({ activeFormula }) => activeFormula)} resolutions={resolutions} onResolve={resolveRow}
             characterKeys={characterKeys} />
         ) : <p className="empty-panel">Choose and confirm the supplier columns to compare prices.</p>}
+      </div>
+      <div className="price-section what-if-section">
+        <details className="what-if-panel" onToggle={(event) => setWhatIfOpen(event.currentTarget.open)}>
+          <summary>Interactive Margin What-If</summary>
+          {whatIfOpen ? (
+            <Suspense fallback={<p className="field-help" role="status">Opening margin simulator…</p>}>
+              <MarginWhatIf compare={compareScenarios} busy={busy} onApply={applyScenario} />
+            </Suspense>
+          ) : null}
+        </details>
       </div>
       <PriceExports platform={platform} market={market} summary={summary} busy={busy} ready={ready} policyPending={policyPending}
         guard={settings.some(({ selection }) => selection.formulaGuard)} inventory={inventory}

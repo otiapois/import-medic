@@ -1,4 +1,5 @@
 import { useId } from 'react';
+import { SignoffBrandingDrawer } from './SignoffBranding';
 import type { DownloadFormat, RepairSummary } from '../../core/worker/protocol';
 import { RepairFingerprints } from './CustodyFingerprints';
 
@@ -71,6 +72,7 @@ export function ExportActions({ result, current, busy, guardEnabled, onGuard, on
           onClick={() => onDownload('repair-bookkeeper-html')}>Download Bookkeeper Sign-Off (.html)</button>
       </div>
       {current ? <RepairFingerprints custody={result.custody} ready={result.canDownload} /> : null}
+      <SignoffBrandingDrawer allowProfileLoad />
     </div>
   );
 }

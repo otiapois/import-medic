@@ -35,9 +35,9 @@ export function landedSupplierCost(source: Amount, rate: Amount | null): string 
   return rate ? decimal(source.units * rate.units, source.scale + rate.scale) : source.text;
 }
 
-function roundedPercent({ numerator, denominator }: Fraction): bigint {
+function roundedPercent({ numerator, denominator }: Fraction, digits = 2): bigint {
   const absolute = numerator < 0n ? -numerator : numerator;
-  const rounded = (absolute * 20_000n + denominator) / (2n * denominator);
+  const rounded = (absolute * 2n * 10n ** BigInt(digits + 2) + denominator) / (2n * denominator);
   return numerator < 0n ? -rounded : rounded;
 }
 
@@ -58,7 +58,7 @@ function exactSum(values: readonly Fraction[], start: number, end: number): Frac
   return { numerator: numerator / factor, denominator: denominator / factor };
 }
 
-export function meanPercent(values: readonly Fraction[]): string {
+export function meanPercent(values: readonly Fraction[], digits = 2): string {
   // Enclose the exact sum in an integer interval. Nearly all means can be
   // rounded directly from these endpoints, independent of the individual denominators.
   const scale = 1_000_000_000_000n;
@@ -73,14 +73,22 @@ export function meanPercent(values: readonly Fraction[]): string {
   }
   const count = BigInt(values.length);
   const denominator = scale * count;
-  const first = roundedPercent({ numerator: lower, denominator });
-  if (first === roundedPercent({ numerator: upper, denominator })) return decimal(first, 2);
+  const first = roundedPercent({ numerator: lower, denominator }, digits);
+  if (first === roundedPercent({ numerator: upper, denominator }, digits)) return decimal(first, digits);
   const exact = exactSum(values, 0, values.length);
-  return decimal(roundedPercent({ ...exact, denominator: exact.denominator * count }), 2);
+  return decimal(roundedPercent({ ...exact, denominator: exact.denominator * count }, digits), digits);
 }
 
-function compare(left: Fraction, right: Fraction): bigint {
+export function compareFractions(left: Fraction, right: Fraction): bigint {
   return left.numerator * right.denominator - right.numerator * left.denominator;
+}
+
+export function grossMarginFraction(landedCost: string, retail: Amount): Fraction | null {
+  if (retail.units === 0n) return null;
+  const [whole, fractional = ''] = landedCost.split('.');
+  const price = retail.units * 10n ** BigInt(fractional.length);
+  const cost = BigInt(whole + fractional) * 10n ** BigInt(retail.scale);
+  return { numerator: price - cost, denominator: price };
 }
 
 function movementBucket(before: Amount, after: Amount): number | null {
@@ -144,15 +152,12 @@ export function createCatalogImpact(inventoryEnabled: boolean, issues: readonly 
     if (!row.landedCost || !after) return undefined;
     const sale = (row.woocommerce || row.bigcommerce) && row.newCompareAtPrice ? readAmount(row.newCompareAtPrice) : null;
     const retail = sale && sale.units >= 0n ? sale : after;
-    const [whole, fractional = ''] = row.landedCost.split('.');
-    const price = retail.units * 10n ** BigInt(fractional.length);
-    const cost = BigInt(whole + fractional) * 10n ** BigInt(retail.scale);
-    const belowOrAtCost = price <= cost;
+    const margin = grossMarginFraction(row.landedCost, retail);
+    const belowOrAtCost = margin === null || margin.numerator <= 0n;
     if (belowOrAtCost) watchlistCount++;
-    if (price === 0n) return { landedCost: row.landedCost, grossMarginPercent: null, belowOrAtCost };
-    const margin = { numerator: price - cost, denominator: price };
-    if (!lowest || compare(margin, lowest) < 0n) lowest = margin;
-    if (!highest || compare(margin, highest) > 0n) highest = margin;
+    if (margin === null) return { landedCost: row.landedCost, grossMarginPercent: null, belowOrAtCost };
+    if (!lowest || compareFractions(margin, lowest) < 0n) lowest = margin;
+    if (!highest || compareFractions(margin, highest) > 0n) highest = margin;
     margins.push(margin);
     return { landedCost: row.landedCost, grossMarginPercent: decimal(roundedPercent(margin), 2), belowOrAtCost };
   }

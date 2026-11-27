@@ -1,4 +1,5 @@
 import type { PromoCampaign, PromoCampaignIssue, PromoCampaignOptions, PromoCampaignRow } from '../../../core/promo-campaign/types';
+import type { SignoffBrand } from '../../../core/branding/signoff-brand';
 import type { StorePlatform } from '../../../core/shopify-price-diff/workspace-profile';
 
 export type CampaignSummary = Pick<PromoCampaign, 'canExport' | 'custody' | 'summary'> & { issueCount: number; rowCount: number };
@@ -15,7 +16,7 @@ interface Page<T> { rows: T[]; total: number; page: number }
 type Request =
   | { type: 'build'; platform: StorePlatform; baseline: File; costSheet?: File; options: PromoCampaignOptions }
   | { type: 'rows' | 'issues'; page: number; pageSize: number }
-  | { type: 'download'; artifact: CampaignArtifact };
+  | { type: 'download'; artifact: CampaignArtifact; branding?: SignoffBrand };
 
 interface Response {
   build: CampaignSummary;

@@ -1,4 +1,4 @@
-import { buildCatalogMigration } from '../../../core/catalog-migrator/engine';
+import { brandCatalogMigrationReports, buildCatalogMigration } from '../../../core/catalog-migrator/engine';
 import type { WorkerPage } from '../../../core/worker/protocol';
 import type { CatalogArtifact, CatalogPreviewRow, CatalogRun, MigrationMessage, MigrationReply } from './migrationWorker';
 
@@ -72,8 +72,16 @@ scope.onmessage = ({ data: { id, request } }) => {
         scope.postMessage({ id, value: readPage(issues, request.page, request.pageSize) });
         return;
       }
+      if (request.type === 'signoffFingerprint') {
+        const branded = await brandCatalogMigrationReports(migration, request.branding);
+        scope.postMessage({ id, value: branded.signOffSha256 });
+        return;
+      }
       if (request.type === 'download') {
-        const artifact = migration.artifacts[request.artifact];
+        const key = request.artifact;
+        const artifact = key === 'targetCsv' || !request.branding
+          ? migration.artifacts[key]
+          : (await brandCatalogMigrationReports(migration, request.branding))[key];
         if (!artifact) throw new Error('Review the source issues before downloading the target CSV.');
         const bytes = artifact.bytes.slice().buffer as ArrayBuffer;
         scope.postMessage({ id, value: { filename: artifact.filename, mime: MIME[request.artifact], bytes } }, [bytes]);

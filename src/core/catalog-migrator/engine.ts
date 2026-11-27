@@ -1,5 +1,6 @@
 import { sha256 } from '../audit/custody';
 import { parseCsv, serializeCsv } from '../csv';
+import { brandSignoffHtml, type SignoffBrand } from '../branding/signoff-brand';
 import { custodyFooter, escapeReportText, offlineReportCsp } from '../report-html';
 import { compareAtHeader, inventoryHeader, optionNames, optionValues, parseBaseline, priceHeader, skuHeader } from '../shopify-price-diff/source';
 import { parseWooCommerceBaseline, wooRegularHeader, wooSaleHeader, wooStockHeader } from '../woocommerce-price-diff/source';
@@ -117,13 +118,13 @@ function verifyTarget(source: CatalogSource, target: CatalogPlatform, csv: strin
 }
 
 type AuditData = Omit<CatalogMigrationResult, 'artifacts' | 'preview' | 'custody'> & { custody: Omit<CatalogMigrationResult['custody'], 'signOffSha256'> };
-function signoff(data: AuditData): string {
+function signoff(data: AuditData, branding?: SignoffBrand): string {
   const esc = (value: string | number | null) => escapeReportText(value === null ? '—' : String(value));
   const mapping = data.mapping.map(field => '<tr><th scope="row">' + esc(field.source) + '</th><td>' + esc(field.target ?? 'Unmapped') +
     '</td><td>' + esc(field.notes) + '</td></tr>').join('');
   const lines = data.issues.map(item => '<tr><td>' + esc(item.line) + '</td><td>' + esc(item.column) + '</td><td>' + esc(item.level) +
     '</td><td>' + esc(item.code) + '</td><td>' + esc(item.message) + '</td></tr>').join('');
-  return '<!doctype html>\n<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">' +
+  return brandSignoffHtml('<!doctype html>\n<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">' +
     '<meta http-equiv="Content-Security-Policy" content="' + offlineReportCsp + '"><title>Migration Sign-Off</title>' +
     '<style>body{max-width:72rem;margin:2rem auto;padding:0 1rem;color:#192638;background:#fff;font:1rem/1.5 system-ui,sans-serif}' +
     'table{width:100%;border-collapse:collapse}th,td{border:1px solid #aeb8c6;text-align:left;padding:.5rem;vertical-align:top;overflow-wrap:anywhere}' +
@@ -141,11 +142,11 @@ function signoff(data: AuditData): string {
     '<th scope="col">Notes</th></tr></thead><tbody>' + mapping + '</tbody></table>' +
     '<table><caption>Source line disclosures and issues</caption><thead><tr><th scope="col">Line</th><th scope="col">Column</th>' +
     '<th scope="col">Level</th><th scope="col">Code</th><th scope="col">Detail</th></tr></thead><tbody>' + lines + '</tbody></table></main>' +
-    custodyFooter([['Source CSV SHA-256', data.custody.sourceSha256], ['Target CSV SHA-256', data.custody.targetSha256]]) + '</body></html>\n';
+    custodyFooter([['Source CSV SHA-256', data.custody.sourceSha256], ['Target CSV SHA-256', data.custody.targetSha256]]) + '</body></html>\n', branding);
 }
 
 export async function buildCatalogMigration(sourcePlatform: CatalogPlatform, targetPlatform: CatalogPlatform, bytes: Uint8Array,
-  filename = sourcePlatform + '-catalog.csv'): Promise<CatalogMigrationResult> {
+  filename = sourcePlatform + '-catalog.csv', branding?: SignoffBrand): Promise<CatalogMigrationResult> {
   const sourceSha256 = sha256(bytes);
   const source = parser[sourcePlatform](bytes, filename);
   const targetDialect = targetPlatform === 'bigcommerce' ? 'bigcommerce-modern' : targetPlatform;
@@ -172,9 +173,20 @@ export async function buildCatalogMigration(sourcePlatform: CatalogPlatform, tar
       targetVariants: verified ? countVariants(verified) : 0, variantParity: verified !== null },
     custody: { sourceSha256: await sourceSha256, ...(targetSha256 ? { targetSha256 } : {}) },
   };
-  const signOffHtml = { filename: 'migration-sign-off.html', bytes: encode(signoff(data)) };
+  const signOffHtml = { filename: 'migration-sign-off.html', bytes: encode(signoff(data, branding)) };
   const custody = { ...data.custody, signOffSha256: await sha256(signOffHtml.bytes) };
   const filenames = { targetCsv: targetCsv?.filename ?? null, auditJson: 'migration-audit.json', signOffHtml: signOffHtml.filename };
   const auditJson = { filename: filenames.auditJson, bytes: encode(JSON.stringify({ schemaVersion: 1, ...data, custody, filenames }, null, 2) + '\n') };
   return { ...data, custody, preview: table && targetCsv ? { headers: table.headers, rows: table.rows } : null, artifacts: { targetCsv, auditJson, signOffHtml } };
+}
+
+export async function brandCatalogMigrationReports(result: CatalogMigrationResult, branding?: SignoffBrand) {
+  const { signOffHtml, auditJson } = result.artifacts;
+  if (branding === undefined) return { signOffHtml, auditJson, signOffSha256: result.custody.signOffSha256 };
+  const decoder = new TextDecoder('utf-8', { fatal: true });
+  const report = { ...signOffHtml, bytes: encode(brandSignoffHtml(decoder.decode(signOffHtml.bytes), branding)) };
+  const signOffSha256 = await sha256(report.bytes);
+  const audit = JSON.parse(decoder.decode(auditJson.bytes)) as { custody: CatalogMigrationResult['custody'] };
+  audit.custody.signOffSha256 = signOffSha256;
+  return { signOffHtml: report, auditJson: { ...auditJson, bytes: encode(JSON.stringify(audit, null, 2) + '\n') }, signOffSha256 };
 }

@@ -7,13 +7,16 @@ import { repairCsv } from '../../../src/core';
 import { sha256 } from '../../../src/core/audit/custody';
 import { analyzeCatalogImpact, createCatalogImpact } from '../../../src/core/analytics/catalog-impact';
 import { parseBigCommerceBaseline } from '../../../src/core/bigcommerce-price-diff/source';
-import { buildCatalogMigration, type CatalogPlatform } from '../../../src/core/catalog-migrator/engine';
+import { SIGNOFF_ACCENTS, brandSignoffHtml, type SignoffBrand } from '../../../src/core/branding/signoff-brand';
+import { brandCatalogMigrationReports, buildCatalogMigration, type CatalogPlatform } from '../../../src/core/catalog-migrator/engine';
 import { readBigCommerce } from '../../../src/core/catalog-migrator/bigcommerce';
 import { readShopify } from '../../../src/core/catalog-migrator/shopify';
 import { readWooCommerceCatalog } from '../../../src/core/catalog-migrator/woocommerce';
 import { decodeCsv, parseCsv, serializeCsv } from '../../../src/core/csv';
 import { guardSpreadsheetCell } from '../../../src/core/formula-guard';
 import { buildPromoCampaign, type PromoCampaignOptions } from '../../../src/core/promo-campaign/engine';
+import { createBookkeeperSignoffHtml } from '../../../src/core/repair/bookkeeper-signoff';
+import { escapeReportText, offlineReportCsp } from '../../../src/core/report-html';
 import { buildMultiSupplierDiff, buildPriceDiff, parseBaseline, parseSupplier } from '../../../src/core/shopify-price-diff';
 import { preparePricing, validatePricingRule } from '../../../src/core/shopify-price-diff/pricing-rules';
 import type { PricingBracket, PricingRule } from '../../../src/core/shopify-price-diff/pricing-rules';
@@ -21,9 +24,12 @@ import { readAmount } from '../../../src/core/shopify-price-diff/prices';
 import { applySupplierRecipe, createSupplierRecipe, parseSupplierRecipe, serializeSupplierRecipe } from '../../../src/core/shopify-price-diff/recipe';
 import type { SupplierRecipe } from '../../../src/core/shopify-price-diff/recipe';
 import { createWorkspaceProfile, parseWorkspaceProfile, serializeWorkspaceProfile } from '../../../src/core/shopify-price-diff/workspace-profile';
+import { createSignoffHtml } from '../../../src/core/shopify-price-diff/signoff-html';
+import type { RowResolution } from '../../../src/core/shopify-price-diff/types';
 import { parseWooCommerceBaseline } from '../../../src/core/woocommerce-price-diff';
 import { inspectImport } from '../../../src/core/verify-import/inspector';
-import { buildSupplierDelta } from '../../../src/core/supplier-delta/engine';
+import { brandSupplierDeltaReports, buildSupplierDelta } from '../../../src/core/supplier-delta/engine';
+import { runPriceComparison, simulatePriceScenarios, type PriceComparison, type WhatIfScenario } from '../../../src/core/whatif/simulator';
 import { listWorkbookSheets } from '../../../src/core/xlsx';
 
 
@@ -1551,7 +1557,157 @@ describe('M15 exact bank and expense repair', () => {
   }, 60_000);
 });
 
-it('accounts for all 25,220 seeded executions without skips', () => {
-  expect(fuzzExecutions).toEqual({ accepted: 25_220, discarded: 0, properties: 44 });
+describe('M16 agency branding and native price replay', () => {
+  const attacks = fc.tuple(fc.string({ maxLength: 8 }), fc.array(fc.constantFrom(
+    '<script>alert(1)</script>', '</aside><img src="https://evil.invalid/a" onerror="run()">',
+    '" onfocus=\'evil\' autofocus="', '&lt;svg/onload=run()&gt;', '"><style>@import "https://evil.invalid"</style>',
+    '<meta http-equiv="refresh" content="0;url=//evil.invalid">', 'url(data:text/html,<svg/onload=foo>)',
+    'أهلاً & "Client\'" 🎁', 'a$b$&c$$d', 'mailto:agency@example.invalid',
+  ), { minLength: 1, maxLength: 1 }), fc.string({ maxLength: 8 })).map(([prefix, [value], suffix]) => prefix + ' ' + value + ' ' + suffix);
+  const accents = Object.keys(SIGNOFF_ACCENTS) as SignoffBrand['accentKey'][];
+  const brand = fc.record({ agencyName: attacks, preparedFor: attacks, contactNote: attacks, accentKey: fc.constantFrom(...accents) });
+  const decoder = new TextDecoder();
+  const baseColumns = ['Handle', 'Title', 'Option1 Name', 'Option1 Value', 'Variant SKU', 'Variant Price', 'Variant Compare At Price'];
+  const baseRows = [['bag', 'Bag', 'Color', 'Red', '0088', '50.00', '60.00']];
+
+  it('escapes 850 sets of hostile branding text in all five offline report paths', async () => {
+    const baselineBytes = csvBytes(baseColumns, baseRows);
+    const baseline = parseBaseline(baselineBytes, 'agency-shop.csv');
+    const sheet = parseSupplier(bytes('SKU,Cost\n0088,60.00'), 'offers.csv').sheets[0];
+    const diff = buildPriceDiff(baseline, sheet, { confirmed: true });
+    const repair = repairCsv(bytes('Date,Description,Amount\n2026-09-15,Client,10.25'), 'agency-bank.csv', 'quickbooks-bank');
+    const generatedAt = new Date('2026-11-27T00:00:00.000Z');
+    const campaign = await buildPromoCampaign('shopify', baselineBytes, { rule: {
+      mode: 'percent-off', amount: '20', rounding: 'none', minimumRetail: '1',
+    } });
+    const delta = await buildSupplierDelta({ bytes: bytes('SKU,Cost\n0088,10'), filename: 'catalog-a.csv' },
+      { bytes: bytes('SKU,Cost\n0088,15'), filename: 'catalog-b.csv' });
+    const migration = await buildCatalogMigration('shopify', 'woocommerce',
+      new Uint8Array(readFileSync(new URL('../../../fixtures/catalog-migrator/shopify-canvas.csv', import.meta.url))));
+    expect(campaign.canExport).toBe(true);
+    expect(delta.status).toBe('ready');
+    expect(migration.artifacts.targetCsv).not.toBeNull();
+    const originals = [createSignoffHtml(baseline, diff), createBookkeeperSignoffHtml(repair, { generatedAt }), campaign.signoffHtml!,
+      delta.signOffHtml!, decoder.decode(migration.artifacts.signOffHtml.bytes)];
+    await checkAsyncFuzz(fc.asyncProperty(brand, async (branding) => {
+      const [deltaReports, migrationReports] = await Promise.all([
+        brandSupplierDeltaReports(delta, branding), brandCatalogMigrationReports(migration, branding),
+      ]);
+      const reports = [createSignoffHtml(baseline, diff, undefined, undefined, undefined, branding),
+        createBookkeeperSignoffHtml(repair, { generatedAt, branding }), brandSignoffHtml(campaign.signoffHtml!, branding),
+        deltaReports.signOffHtml!, decoder.decode(migrationReports.signOffHtml.bytes)];
+      for (const [index, report] of reports.entries()) {
+        const header = /<aside class="signoff-brand"[\s\S]+?<\/aside>/.exec(report)![0];
+        expect(report.replace(header, '')).toBe(originals[index]);
+        expect(report).toContain(offlineReportCsp);
+        for (const value of [branding.agencyName, branding.preparedFor, branding.contactNote]) expect(header).toContain(escapeReportText(value));
+        expect(header).toContain('background:' + SIGNOFF_ACCENTS[branding.accentKey].background + ';color:#ffffff');
+        expect(header).not.toMatch(/<(?:script|style|img|svg|iframe|meta|object|link)\b|https?:\/\/|\b(?:href|src|onerror|onfocus)=["']/i);
+      }
+      const deltaSha = createHash('sha256').update(deltaReports.signOffHtml!).digest('hex');
+      expect(deltaReports.signOffHtmlSha256).toBe(deltaSha);
+      expect(JSON.parse(deltaReports.auditJson)).toEqual({ ...JSON.parse(delta.auditJson), custody: { ...delta.custody, signOffHtmlSha256: deltaSha } });
+      const migrationSha = createHash('sha256').update(migrationReports.signOffHtml.bytes).digest('hex');
+      expect(migrationReports.signOffSha256).toBe(migrationSha);
+      expect(JSON.parse(decoder.decode(migrationReports.auditJson.bytes))).toEqual({
+        ...JSON.parse(decoder.decode(migration.artifacts.auditJson.bytes)), custody: { ...migration.custody, signOffSha256: migrationSha },
+      });
+    }), { seed: seed + 44, numRuns: 850 });
+  }, 60_000);
+
+  it('replays 750 old and branded profile round-trips with invalid palette and duplicate-key mutations', () => {
+    checkFuzz(fc.property(brand, fc.constantFrom('shopify', 'woocommerce', 'bigcommerce'),
+      fc.constantFrom('USD', 'AED', 'EUR'), (branding, platform, storeCurrency) => {
+        const v1 = { version: 1, storeName: 'Agency Sandbox', platform, storeCurrency, dropThresholdPercent: 10 } as const;
+        expect(parseWorkspaceProfile(bytes(serializeWorkspaceProfile(v1)))).toEqual({ ok: true, value: v1 });
+        const branded = { ...v1, branding };
+        const serialized = serializeWorkspaceProfile(branded);
+        expect(parseWorkspaceProfile(bytes(serialized))).toEqual({ ok: true, value: branded });
+        expect(parseWorkspaceProfile(bytes(serialized.replace('"accentKey":', '"accentKey": "navy", "accentKey":')))).toMatchObject({
+          ok: false, diagnostics: [{ code: 'duplicate-workspace-profile-property' }],
+        });
+        expect(createWorkspaceProfile({ ...v1, branding: { ...branding, accentKey: 'navy; color:' + branding.contactNote } })).toMatchObject({ ok: false });
+        expect(createWorkspaceProfile({ ...v1, branding: { ...branding, contactNote: branding.contactNote + '\u202e' } })).toMatchObject({ ok: false });
+        expect(createWorkspaceProfile({ ...v1, branding: { ...branding, background: 'navy' } })).toMatchObject({ ok: false });
+      }), { seed: seed + 45, numRuns: 750 });
+  });
+
+  it('matches applied update and rollback CSV cents across 900 combinations of pricing, market scope and review', () => {
+    checkFuzz(fc.property(fc.integer({ min: 100, max: 999 }), fc.bigInt({ min: 1900n, max: 3300n }), fc.bigInt({ min: 1800n, max: 3700n }),
+      fc.integer({ min: -15, max: 45 }), fc.integer({ min: -5, max: 8 }), fc.boolean(),
+      fc.constantFrom('normal', 'override', 'skip', 'invalid', 'unconfirmed-fx', 'supplier-conflict'),
+      fc.constantFrom('markup', 'buffer', 'ending', 'combined'), (id, costA, costB, markup, fxBuffer, market, state, mode) => {
+        const sku = '00' + id;
+        const sibling = String(id);
+        const targetColumn = market ? 'Price / EU' : 'Variant Price';
+        const original = { [sku]: '50.00', [sibling]: '48.00' };
+        const source = csvBytes([...baseColumns, 'Price / EU', 'Price / UAE'], [
+          ['bag', 'Bag', 'Color', 'Red', sku, market ? '333.00' : original[sku], '', original[sku], '555.00'],
+          ['bag', '', 'Color', 'Blue', sibling, market ? '444.00' : original[sibling], '', original[sibling], '666.00'],
+        ]);
+        const baseline = parseBaseline(source);
+        const sheet = parseSupplier(bytes('SKU,Cost,Currency\n' + sku + ',' + cents(costA) + ',USD\n' + sibling + ',' +
+          (state === 'invalid' ? 'unparseable' : cents(costB)) + ',USD'), 'pricebook.csv').sheets[0];
+        const selection = { confirmed: true, skuColumn: 0, priceColumn: 1, fxRateConfirmed: state !== 'unconfirmed-fx',
+          ...(market ? { market: 'EU' } : {}), pricingRule: { mode: 'multiplier', multiplier: '2', fixedFee: '.11',
+            fx: { sourceCurrency: 'USD', storeCurrency: 'EUR', fxRate: '1.25' } } } as const;
+        const resolutions: Readonly<Record<number, RowResolution>> = state === 'skip' ? { 3: { skip: true } } :
+          state === 'override' ? { 3: { price: '59.25' } } : {};
+        const supplier = { supplierId: 'agency', filename: 'pricebook.csv', sheet, selection, resolutions };
+        const other = { ...supplier, supplierId: 'alternate', sheet: parseSupplier(bytes('SKU,Cost,Currency\n' +
+          sku + ',30.25,USD'), 'second.csv').sheets[0] };
+        const comparison: PriceComparison = state === 'supplier-conflict'
+          ? { kind: 'batch', suppliers: [supplier, other], options: { ...(market ? { market: 'EU' } : {}), conflictPolicy: 'prefer-last' } }
+          : { kind: 'single', supplier };
+        const scenario: WhatIfScenario = { id: mode,
+          ...(mode === 'markup' || mode === 'combined' ? { markupPercent: String(markup) } : {}),
+          ...(mode === 'buffer' || mode === 'combined' ? { fxBufferPercent: String(fxBuffer) } : {}),
+          ...(mode === 'ending' || mode === 'combined' ? { rounding: 'ending-95' } : {}),
+          ...(mode === 'combined' ? { minimumRetail: '25.125' } : {}),
+        };
+        const current = runPriceComparison(baseline, comparison);
+        const [plan] = simulatePriceScenarios(baseline, comparison, [scenario], current);
+        const apply = (entry: typeof supplier | typeof other) => ({
+          ...entry, selection: { ...entry.selection, pricingRule: plan.suppliers.find(({ supplierId }) => entry.supplierId === supplierId)!.pricingRule },
+        });
+        const exported = runPriceComparison(baseline, comparison.kind === 'batch'
+          ? { ...comparison, suppliers: [apply(supplier), apply(other)] } : { kind: 'single', supplier: apply(supplier) });
+        expect(plan.status).toBe(exported.status);
+        if (state === 'invalid' || state === 'unconfirmed-fx' || state === 'supplier-conflict') {
+          expect(plan).toMatchObject({ canApply: false, status: 'review', averageMarginPercent: null, totalRetailDeltaCents: null });
+          expect(exported.updateBytes).toBeNull();
+          return;
+        }
+        if (!exported.updateBytes || !exported.rollbackBytes) {
+          expect(plan).toMatchObject({ canApply: false });
+          return;
+        }
+        expect(exported.canDownload).toBe(true);
+        const [header, ...rows] = parseCsv(decoder.decode(exported.updateBytes)).records;
+        expect(header.cells.at(-1)).toBe(targetColumn);
+        const [rollbackHeader, ...restored] = parseCsv(decoder.decode(exported.rollbackBytes)).records;
+        expect(rollbackHeader.cells).toEqual(header.cells);
+        const key = header.cells.indexOf('Variant SKU');
+        const price = header.cells.indexOf(targetColumn);
+        let total = 0n;
+        let changes = 0;
+        for (const [index, { cells }] of rows.entries()) {
+          const previous = original[cells[key]];
+          expect(restored[index].cells[key]).toBe(cells[key]);
+          expect(restored[index].cells[price]).toBe(previous);
+          if (cells[price] !== previous) changes++;
+          total += BigInt(cells[price].replace('.', '')) - BigInt(previous.replace('.', ''));
+          if (cells[key] === sibling && state === 'skip') expect(cells[price]).toBe(previous);
+          if (cells[key] === sibling && state === 'override') expect(cells[price]).toBe('59.25');
+        }
+        expect(plan.totalRetailDeltaCents).toBe(total.toString());
+        expect(plan.changedSkuCount).toBe(changes);
+        expect(plan.unknownRetailSkuCount).toBe(0);
+      }), { seed: seed + 46, numRuns: 900 });
+  }, 60_000);
+});
+
+it('accounts for all 27,720 seeded executions without skips', () => {
+  expect(fuzzExecutions).toEqual({ accepted: 27_720, discarded: 0, properties: 47 });
   console.info(`Deterministic fuzz: ${fuzzExecutions.accepted} accepted, ${fuzzExecutions.discarded} discarded across ${fuzzExecutions.properties} properties.`);
 });

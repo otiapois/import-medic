@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.6.0 (M16)
+
+- Set an agency name and accent for the offline Client, Campaign, Supplier Delta, Migration, and Bookkeeper Sign-Off reports. Add a client name and contact note if needed. Save the branding in a Workspace Profile JSON and load it in either workbench.
+- Open **Interactive Margin What-If** in **Build Update** to compare the current rule with markup, rounding, and FX scenarios. Review the price and margin impact, then apply an eligible scenario to the batch and review the verified native CSV pair.
+- Add seeded fuzz coverage for hostile branding text across all five offline reports, Workspace Profile compatibility, and exact agreement between scenario results and the native pricing replay.
+
 ## v1.5.0 (M15)
 
 - Choose **Xero Bank CSV** or **FreshBooks CSV** in the local repair workbench. Prepare a Xero bank statement CSV or a FreshBooks expense CSV with explicit field mapping and a single currency. Resolve ambiguous source dates before export.

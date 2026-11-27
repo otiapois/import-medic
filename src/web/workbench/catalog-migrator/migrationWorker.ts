@@ -1,4 +1,5 @@
 import type { buildCatalogMigration } from '../../../core/catalog-migrator/engine';
+import type { SignoffBrand } from '../../../core/branding/signoff-brand';
 import type { WorkerDownload, WorkerPage } from '../../../core/worker/protocol';
 
 type Migration = Awaited<ReturnType<typeof buildCatalogMigration>>;
@@ -19,12 +20,14 @@ interface PageRequest { page: number; pageSize: number }
 type Request =
   | { type: 'build'; source: CatalogPlatform; target: CatalogPlatform; file: File }
   | ({ type: 'rows' | 'issues' } & PageRequest)
-  | { type: 'download'; artifact: CatalogArtifact };
+  | { type: 'signoffFingerprint'; branding: SignoffBrand }
+  | { type: 'download'; artifact: CatalogArtifact; branding?: SignoffBrand };
 
 interface Responses {
   build: CatalogRun;
   rows: WorkerPage<CatalogPreviewRow>;
   issues: WorkerPage<CatalogIssue>;
+  signoffFingerprint: string;
   download: WorkerDownload;
 }
 

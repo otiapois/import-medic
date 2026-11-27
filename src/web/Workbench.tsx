@@ -15,6 +15,7 @@ import type {
 import { SHOPIFY_PRICE_UPDATE_PATH } from './seo/routes';
 import { Results } from './workbench/Results';
 import { ModeNavigation } from './workbench/ModeNavigation';
+import { useSignoffBranding } from './workbench/SignoffBranding';
 import { getSample } from './workbench/samples';
 import { TabBar } from './workbench/TabBar';
 import { downloadFile } from './workbench/downloads';
@@ -40,6 +41,7 @@ const DEFAULT_OPTIONS: Record<PlatformId, RepairOptions> = {
 type SourceFile = { filename: string } & ({ sample: true; bytes: Uint8Array } | { sample: false; file: File });
 
 export function Workbench({ initialPlatform }: { initialPlatform: PlatformId }) {
+  const { branding } = useSignoffBranding();
   const id = useId();
   const [platform, setPlatform] = useState(initialPlatform);
   const [source, setSource] = useState<SourceFile | null>(null);
@@ -126,7 +128,9 @@ export function Workbench({ initialPlatform }: { initialPlatform: PlatformId }) 
   function download(format: RepairDownload) {
     if (!current || progress || (format === 'repair-csv' && !report.result.canDownload)) return;
     void run(
-      ({ worker, progress: update }) => worker.request({ type: 'download', format }, update),
+      ({ worker, progress: update }) => worker.request({
+        type: 'download', format, ...(format === 'repair-bookkeeper-html' && branding ? { branding } : {}),
+      }, update),
       ({ filename, bytes, mime }) => downloadFile(filename, bytes, mime),
       'exporting',
     );

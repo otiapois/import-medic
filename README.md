@@ -92,6 +92,8 @@ Download the matched files and inspect both in **Verify Update / Rollback CSV**.
 
 After a catalog comparison, check **Batch Impact & Margin Summary** for price moves, average and range of gross margins, and the change in comparable stock when quantity is mapped. Margin uses a known landed supplier cost and the effective retail price, including a WooCommerce sale price when present. Select **Zero / Negative Margin Alert** to show affected SKUs in the diff. The offline Client Sign-Off HTML includes the batch summary for review before import.
 
+Expand **Interactive Margin What-If** in the completed **Build Update** review. Compare **Current Rule** with **+5% Markup**, **FX +3% Buffer**, **.95 Rounding**, or a custom scenario. FX scenarios use the rate confirmed for the batch. Review the average margin, negative-margin SKU count, and total retail impact. Use **Apply Scenario** for an eligible result, then review the updated comparison and download the verified pair. The retail impact sums price changes across the affected catalog rows. [Scenario calculations and review rules](docs/subsystems/shopify-price-diff.md#margin-what-if-simulator)
+
 ### Resolve competing supplier offers
 
 Check the mapping for each sheet and use the supplier label to identify each source in review. **Block conflicts** is the default. The comparison shows competing suppliers, their original row numbers, and raw values for an affected SKU while it holds the native pair. To resolve competing prices, select and confirm **Prefer lowest price**, **Prefer highest price**, **Prefer first supplier**, or **Prefer last supplier**. First and last follow the visible supplier order. Low and high compare supplier prices in the same currency before pricing adjustments. Review the selected source in the diff, the CSV or JSON audit, and the Client Sign-Off report. Correct unresolved inputs or skip the affected row before exporting.
@@ -111,6 +113,12 @@ For the next batch, choose fresh files, select **Load Supplier Recipe (.json)** 
 ### Carry store defaults to another session
 
 Open **Workspace profile** and set the store name and currency. Select **Save Workspace Profile (.json)** to carry those settings, the platform, and the first supplier's guardrails and tiered pricing defaults. To reuse them, select the matching platform and choose **Load Workspace Profile (.json)**. Review the defaults before confirming the new batch. Keep a separate supplier recipe when you also need to reuse a mapping. Workspace settings stay in memory during the session and the downloaded JSON is the portable copy.
+
+### Brand an offline sign-off
+
+Open **Workspace profile** and expand **Agency Sign-Off Branding**. Enter **Agency name** and choose Forest, Navy, Slate, or Burgundy. Use **Prepared for** and **Contact email or note** if needed. Check the preview before downloading a Client, Campaign, Supplier Delta, or Migration Sign-Off from the price workbench. The report includes the supplied branding as text and opens offline.
+
+Save the Workspace Profile JSON to reuse the branding after navigating away. In the home workbench, complete a repair and open **Agency Sign-Off Branding** by the Bookkeeper export. Set the branding there or use **Load Workspace Profile (.json)** to bring in the same branding before downloading the Bookkeeper Sign-Off. [Branding and Workspace Profile contract](docs/subsystems/web-ui-seo.md#agency-sign-off-branding)
 
 ### Guard spreadsheet formulas
 

@@ -30,6 +30,22 @@ it('transfers repeatable verified byte pairs and clears stale exports on invalid
     const rollback = { type: 'download', format: 'price-rollback-csv' } as const;
     expect(await send(request)).toMatchObject({ kind: 'result', value: { canDownload: true, rollbackVerification: { checked: true } } });
     expect(await send(update)).toMatchObject({ kind: 'result', value: { filename: 'store-price-update.csv' } });
+    const scenarioRequest = { type: 'simulatePrice', scenarios: [{ id: 'increase', markupPercent: '5' }] } as const;
+    const scenario = await send(scenarioRequest);
+    expect(scenario).toMatchObject({ kind: 'result', value: [{
+      id: 'increase', status: 'ready', canApply: true, changedSkuCount: 1, totalRetailDeltaCents: '310',
+      suppliers: [{ supplierId: 'primary', pricingRule: { mode: 'multiplier', multiplier: '2.2', retailAdjustmentPercent: '5' } }],
+    }] });
+    function expectPriceCsv(reply: WorkerReply, expected: string) {
+      if (reply.kind !== 'result' || !reply.value || !('bytes' in reply.value)) throw new Error('Expected native price bytes');
+      expect(new TextDecoder().decode(reply.value.bytes)).toMatch(expected);
+    }
+    expectPriceCsv(await send(update), '0007,22.00');
+    if (scenario.kind !== 'result' || !Array.isArray(scenario.value)) throw new Error('Expected scenario plans');
+    const pricingRule = scenario.value[0].suppliers[0].pricingRule;
+    expect(await send({ ...request, selection: { ...request.selection, pricingRule } })).toMatchObject({ kind: 'result', value: { canDownload: true } });
+    expectPriceCsv(await send(update), '0007,23.10');
+    await send(request);
     const first = await send(rollback);
     const second = await send(rollback);
     expect(first).toMatchObject({ kind: 'result', value: { filename: 'store-price-rollback.csv' } });
@@ -39,6 +55,7 @@ it('transfers repeatable verified byte pairs and clears stale exports on invalid
     expect(new TextDecoder().decode(second.value.bytes)).toBe(new TextDecoder().decode(first.value.bytes));
 
     await send({ type: 'invalidatePrice' });
+    expect(await send(scenarioRequest)).toMatchObject({ kind: 'error' });
     expect(await send(update)).toMatchObject({ kind: 'error' });
     expect(await send(rollback)).toMatchObject({ kind: 'error' });
     await send(request);

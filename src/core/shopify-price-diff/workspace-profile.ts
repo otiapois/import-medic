@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { hasDuplicateKeys, profileText, thresholds } from './settings-validation';
 import { currencyCode, tieredSettingsSchema } from './pricing-rules';
 import type { RecipeResult } from './recipe';
+import { signoffBrandSchema } from '../branding/signoff-brand';
 
 export type { StorePlatform } from './types';
 export const MAX_WORKSPACE_PROFILE_BYTES = 64 * 1024;
@@ -15,6 +16,7 @@ const workspaceSchema = z.strictObject({
   increaseThresholdPercent: thresholds(100_000).optional(),
   inventoryDropThresholdPercent: thresholds(100).optional(),
   pricingRule: tieredSettingsSchema.optional(),
+  branding: signoffBrandSchema.optional(),
 });
 
 export type WorkspaceProfile = z.infer<typeof workspaceSchema>;

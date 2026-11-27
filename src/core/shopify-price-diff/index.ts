@@ -223,6 +223,7 @@ export function previewPricingFormula(baseline: Baseline, supplier: SupplierShee
       const compareAt = applyAutoCompareAt?.(computed);
       return { supplierRow: row.line, supplierPrice, computedPrice: computed.text,
         ...(computed.matchedTier ? { matchedTier: computed.matchedTier } : {}),
+        ...(rule?.retailAdjustmentPercent === undefined ? {} : { retailAdjustmentPercent: rule.retailAdjustmentPercent }),
         ...(fx ? { fxApplied: fx } : {}), ...(compareAt ? { computedCompareAtPrice: compareAt.text } : {}) };
     }
   }

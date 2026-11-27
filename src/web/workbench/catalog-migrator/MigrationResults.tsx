@@ -14,7 +14,7 @@ const PREVIEW_ORDER = [
   'Sale price', 'Sale Price', 'Variant Compare At Price', 'Stock', 'Current Stock', 'Variant Inventory Qty',
 ];
 
-export function MigrationResults({ report }: { report: Report }) {
+export function MigrationResults({ report, signoffFingerprint }: { report: Report; signoffFingerprint?: string }) {
   const id = useId();
   const { result } = report;
   const { summary, custody, mapping, unmappedColumns } = result;
@@ -61,7 +61,7 @@ export function MigrationResults({ report }: { report: Report }) {
         <CustodyFingerprints open entries={[
           { field: 'source', label: 'Source CSV', sha256: custody.sourceSha256, detail: result.sourceFilename },
           { field: 'target', label: 'Target CSV', sha256: custody.targetSha256 },
-          { field: 'sign-off', label: 'Sign-Off HTML', sha256: custody.signOffSha256 },
+          { field: 'sign-off', label: 'Sign-Off HTML', sha256: signoffFingerprint },
         ]} />
       </section>
     </>

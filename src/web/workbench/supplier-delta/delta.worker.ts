@@ -1,4 +1,4 @@
-import { buildSupplierDelta, inspectSupplierDeltaSource } from '../../../core/supplier-delta/engine';
+import { brandSupplierDeltaReports, buildSupplierDelta, inspectSupplierDeltaSource } from '../../../core/supplier-delta/engine';
 import type { DeltaFilter, DeltaInspection, DeltaMessage, DeltaReply, DeltaRow, DeltaSide, DeltaSummary } from './deltaWorker';
 
 const scope = globalThis as unknown as {
@@ -71,10 +71,16 @@ scope.onmessage = ({ data: { id, request } }) => {
         scope.postMessage({ id, value: readPage(result.issues, request.page, request.pageSize) });
         return;
       }
+      if (request.type === 'signoffFingerprint') {
+        const branded = await brandSupplierDeltaReports(result, request.branding);
+        scope.postMessage({ id, value: branded.signOffHtmlSha256 });
+        return;
+      }
+      const reports = request.artifact === 'csv' || !request.branding ? result : await brandSupplierDeltaReports(result, request.branding);
       const artifact = {
         csv: { content: result.deltaCsv, filename: 'supplier-delta-report.csv', mime: 'text/csv;charset=utf-8' },
-        audit: { content: result.auditJson, filename: 'supplier-delta-audit.json', mime: 'application/json;charset=utf-8' },
-        signoff: { content: result.signOffHtml, filename: 'supplier-delta-sign-off.html', mime: 'text/html;charset=utf-8' },
+        audit: { content: reports.auditJson, filename: 'supplier-delta-audit.json', mime: 'application/json;charset=utf-8' },
+        signoff: { content: reports.signOffHtml, filename: 'supplier-delta-sign-off.html', mime: 'text/html;charset=utf-8' },
       }[request.artifact];
       if (artifact.content === null || (request.artifact !== 'audit' && result.status !== 'ready')) {
         throw new Error('This report is held. Review the current supplier delta.');

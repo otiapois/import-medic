@@ -11,6 +11,7 @@ import { cellValue, type Baseline, type DiffIssue, type StorePlatform, type Vari
 import { inspectImport } from '../verify-import/inspector';
 import { parseWooCommerceBaseline, wooIdentityHeaders, wooRegularHeader, wooSaleHeader, wooWritable } from '../woocommerce-price-diff/source';
 import { campaignCosts } from './costs';
+import type { SignoffBrand } from '../branding/signoff-brand';
 import { promoSignoff } from './signoff';
 import type { PromoCampaign, PromoCampaignCustody, PromoCampaignIssue, PromoCampaignOptions, PromoCampaignRow, PromoCampaignSummary } from './types';
 
@@ -130,7 +131,8 @@ function summarize(rows: readonly PromoCampaignRow[]): PromoCampaignSummary {
   return summary;
 }
 
-export async function buildPromoCampaign(platform: StorePlatform, baselineBytes: Uint8Array, options: PromoCampaignOptions): Promise<PromoCampaign> {
+export async function buildPromoCampaign(platform: StorePlatform, baselineBytes: Uint8Array, options: PromoCampaignOptions,
+  branding?: SignoffBrand): Promise<PromoCampaign> {
   const baselineDigest = sha256(baselineBytes);
   const costSheetDigest = options.costSheet !== undefined ? sha256(options.costSheet) : undefined;
   const issues: PromoCampaignIssue[] = [];
@@ -264,5 +266,5 @@ export async function buildPromoCampaign(platform: StorePlatform, baselineBytes:
   const auditJson = JSON.stringify({ version: 1, platform, storeLabel, rule: options.rule, scope: options.scope ?? null, costCheck: costs !== null,
     skippedLines: [...skips], summary, rows, issues, canExport, verification, fileNames, custody }, null, 2) + '\n';
   return { platform, rows, issues, summary, canExport, launchCsv, revertCsv, auditJson, fileNames, custody,
-    signoffHtml: canExport ? promoSignoff(storeLabel, platform, summary, rows, custody) : null };
+    signoffHtml: canExport ? promoSignoff(storeLabel, platform, summary, rows, custody, branding) : null };
 }

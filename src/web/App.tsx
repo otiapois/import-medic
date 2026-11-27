@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { Workbench } from './Workbench';
 import { PriceDiffWorkbench } from './workbench/PriceDiffWorkbench';
+import { SignoffBrandingProvider } from './workbench/SignoffBranding';
 import { platformPages, SHOPIFY_PRICE_UPDATE_PATH } from './seo/routes';
 import type { Page } from './seo/routes';
 
@@ -62,7 +63,9 @@ export function App({ page }: { page: Page }) {
           <h1>{page.heading}</h1>
           <p>{page.description}</p>
         </div>
-        {priceStudio ? <PriceDiffWorkbench characterKeys={characterKeys} /> : <Workbench initialPlatform={page.platform} />}
+        <SignoffBrandingProvider>
+          {priceStudio ? <PriceDiffWorkbench characterKeys={characterKeys} /> : <Workbench initialPlatform={page.platform} />}
+        </SignoffBrandingProvider>
         <div className="site-guidance">
           <section aria-labelledby="examples-heading">
             <h2 id="examples-heading">CSV repair examples</h2>

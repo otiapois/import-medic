@@ -5,7 +5,7 @@ import { decodeCsv, parseCsv } from '../csv';
 import { Journal } from '../journal';
 import { stripBankStatement } from '../profiles/quickbooks-bank';
 import { createBookkeeperSignoffHtml } from '../repair/bookkeeper-signoff';
-import { buildMultiSupplierDiff, buildPriceDiff, parseBaseline, parseSupplier, previewPricingFormula, suggestColumns } from '../shopify-price-diff';
+import { parseBaseline, parseSupplier, previewPricingFormula, suggestColumns } from '../shopify-price-diff';
 import { applySupplierRecipe, createSupplierRecipe, MAX_RECIPE_BYTES, parseSupplierRecipe, serializeSupplierRecipe } from '../shopify-price-diff/recipe';
 import { parseWooCommerceBaseline } from '../woocommerce-price-diff';
 import { parseBigCommerceBaseline } from '../bigcommerce-price-diff';
@@ -18,6 +18,8 @@ import { suggestPlatforms } from './platform-suggestion';
 import { invalidatesResult, resultScope, supersededResult } from './protocol';
 import type { DiffFilter, DiffSummary, DownloadFormat, InspectionSummary, PlatformSuggestion, RepairSummary, SheetMeta, SupplierMeta, WorkerDownload, WorkerMessage, WorkerPage, WorkerProgress, WorkerReply, WorkerRequest, WorkerResult } from './protocol';
 import { guardSummary, indexRepairViews, repairAudit, repairAuditText } from './repair-views';
+import type { SignoffBrand } from '../branding/signoff-brand';
+import { runPriceComparison, simulatePriceScenarios, type PriceComparison } from '../whatif/simulator';
 
 const scope = globalThis as unknown as {
   onmessage: (event: MessageEvent<WorkerMessage>) => void;
@@ -92,7 +94,7 @@ function pageOf<T>(items: readonly T[], page: number, pageSize: number): WorkerP
 const yieldToWorker = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
 async function indexPriceResult(result: PriceDiffResult, source: Baseline & { sha256: string }, suppliers: readonly SupplierFingerprint[],
-  pricingRule: ColumnSelection['pricingRule'], progress: Progress, ensureCurrent: () => void) {
+  pricingRule: ColumnSelection['pricingRule'], comparison: PriceComparison, progress: Progress, ensureCurrent: () => void) {
   const { updateBytes, rollbackBytes } = result;
   const custody: PriceCustody = { baselineSha256: source.sha256, suppliers };
   if (result.canDownload && updateBytes && rollbackBytes) {
@@ -145,7 +147,7 @@ async function indexPriceResult(result: PriceDiffResult, source: Baseline & { sh
     cached = { filter, search, matching };
     return matching;
   }
-  return { result, rows, issues, variantOptions, summary, pricingRule, marginByRow, searchRows };
+  return { result, rows, issues, variantOptions, summary, pricingRule, comparison, marginByRow, searchRows };
 }
 
 function makeDownload(filename: string, text: string, mime: string): WorkerDownload {
@@ -156,7 +158,7 @@ function pricePlatformName(): string {
   return baseline?.platform === 'bigcommerce' ? 'BigCommerce' : baseline?.platform === 'woocommerce' ? 'WooCommerce' : 'Shopify';
 }
 
-function download(format: DownloadFormat): WorkerDownload {
+function download(format: DownloadFormat, branding?: SignoffBrand): WorkerDownload {
   if (format.startsWith('price-')) {
     const state = requireLoaded(price, 'Run the ' + pricePlatformName() + ' price comparison before downloading.');
     const basename = baseline?.name.replace(/\.csv$/i, '') || baseline?.platform || 'shopify';
@@ -165,7 +167,7 @@ function download(format: DownloadFormat): WorkerDownload {
     if (format === 'price-signoff-html') {
       const source = requireLoaded(baseline, 'Choose a ' + pricePlatformName() + ' baseline CSV first.');
       return makeDownload(`${basename}-client-sign-off.html`, createSignoffHtml(source, state.result, state.pricingRule,
-        { summary: state.summary.analytics, watchlist: state.rows['margin-watchlist'] }, state.summary.custody), 'text/html;charset=utf-8');
+        { summary: state.summary.analytics, watchlist: state.rows['margin-watchlist'] }, state.summary.custody, branding), 'text/html;charset=utf-8');
     }
     if (!state.result.canDownload || !state.result.updateBytes || !state.result.rollbackBytes) {
       throw new Error('The ' + pricePlatformName() + ' CSV downloads are blocked. Review the audit before exporting.');
@@ -185,7 +187,7 @@ function download(format: DownloadFormat): WorkerDownload {
     const safeBasename = basename.replace(/[<>:"/\\|?*\u0000-\u001f\u007f]/g, '_').slice(0, 160).replace(/[ .]+$/, '') || 'import-medic';
     const detectedProvider = state.suggestions.find(({ platform }) => platform === result.platform)?.provider;
     return makeDownload(`${safeBasename}-bookkeeper-sign-off.html`, createBookkeeperSignoffHtml(result,
-      { generatedAt: new Date(), detectedProvider, options: state.options, custody: state.custody }), 'text/html;charset=utf-8');
+      { generatedAt: new Date(), detectedProvider, options: state.options, custody: state.custody, branding }), 'text/html;charset=utf-8');
   }
   const audit = repairAudit(result, state.options, state.custody);
   if (format === 'repair-audit-json') return makeDownload(`${basename}.audit.json`, JSON.stringify(audit, null, 2) + '\n', jsonMime);
@@ -229,11 +231,13 @@ async function run(request: WorkerRequest, progress: Progress, ensureCurrent: ()
         const sheet = requireLoaded(input.sheets[sheetIndex], 'Choose an available supplier worksheet first.');
         return { ...settings, supplierId, sheet, filename: input.name, fingerprint: input.fingerprint };
       });
+      const { market, conflictPolicy, conflictPolicyConfirmed } = request;
+      const comparison: PriceComparison = { kind: 'batch', suppliers: batch, options: { market, conflictPolicy, conflictPolicyConfirmed } };
       progress('comparing', 5);
-      const result = buildMultiSupplierDiff(base, batch, request, undefined, progress);
+      const result = runPriceComparison(base, comparison, progress);
       progress('comparing', 91);
       const state = await indexPriceResult(result, base, batch.map(({ fingerprint }) => fingerprint),
-        batch.length === 1 ? batch[0].selection.pricingRule : undefined, progress, ensureCurrent);
+        batch.length === 1 ? batch[0].selection.pricingRule : undefined, comparison, progress, ensureCurrent);
       ensureCurrent();
       price = state;
       progress('comparing', 100);
@@ -253,14 +257,25 @@ async function run(request: WorkerRequest, progress: Progress, ensureCurrent: ()
       if (request.type === 'priceSettings') return suggestColumns(base, sheet);
       const selection = { ...request.selection, market: request.market ?? request.selection.market };
       if (request.type === 'priceFormulaPreview') return previewPricingFormula(base, sheet, selection);
+      const comparison: PriceComparison = { kind: 'single', supplier: {
+        sheet, selection, resolutions: request.resolutions, supplierId, label: request.label, filename: input.name,
+      } };
       progress('comparing', 5);
-      const result = buildPriceDiff(base, sheet, selection, request.resolutions, undefined, { supplierId, label: request.label, filename: input.name }, progress);
+      const result = runPriceComparison(base, comparison, progress);
       progress('comparing', 91);
-      const state = await indexPriceResult(result, base, [input.fingerprint], request.selection.pricingRule, progress, ensureCurrent);
+      const state = await indexPriceResult(result, base, [input.fingerprint], request.selection.pricingRule, comparison, progress, ensureCurrent);
       ensureCurrent();
       price = state;
       progress('comparing', 100);
       return price.summary;
+    }
+    case 'simulatePrice': {
+      const state = requireLoaded(price, 'Run the current price comparison before previewing scenarios.');
+      const base = requireLoaded(baseline, 'Choose a baseline CSV before previewing scenarios.');
+      const result = simulatePriceScenarios(base, state.comparison, request.scenarios, state.result);
+      await yieldToWorker();
+      ensureCurrent();
+      return result;
     }
     case 'diffRows': {
       const state = requireLoaded(price, 'Run the ' + pricePlatformName() + ' price comparison first.');
@@ -365,7 +380,7 @@ async function run(request: WorkerRequest, progress: Progress, ensureCurrent: ()
       progress('exporting', 25);
       await yieldToWorker();
       ensureCurrent();
-      const result = download(request.format);
+      const result = download(request.format, request.branding);
       progress('exporting', 90);
       await yieldToWorker();
       ensureCurrent();

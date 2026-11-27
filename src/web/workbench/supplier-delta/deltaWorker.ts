@@ -1,4 +1,5 @@
 import type { buildSupplierDelta, inspectSupplierDeltaSource } from '../../../core/supplier-delta/engine';
+import type { SignoffBrand } from '../../../core/branding/signoff-brand';
 import type { WorkerDownload, WorkerPage } from '../../../core/worker/protocol';
 
 type DeltaResult = Awaited<ReturnType<typeof buildSupplierDelta>>;
@@ -24,7 +25,8 @@ type Request =
   | { type: 'build'; comparisonId: number; sources: Record<DeltaSide, ComparisonSource> }
   | { type: 'rows'; comparisonId: number; filter: DeltaFilter; page: number; pageSize: number }
   | { type: 'issues'; comparisonId: number; page: number; pageSize: number }
-  | { type: 'download'; comparisonId: number; artifact: DeltaArtifact };
+  | { type: 'signoffFingerprint'; comparisonId: number; branding: SignoffBrand }
+  | { type: 'download'; comparisonId: number; artifact: DeltaArtifact; branding?: SignoffBrand };
 
 interface Responses {
   inspect: DeltaInspection;
@@ -32,6 +34,7 @@ interface Responses {
   build: DeltaSummary;
   rows: WorkerPage<DeltaRow>;
   issues: WorkerPage<DeltaIssue>;
+  signoffFingerprint: string | undefined;
   download: WorkerDownload;
 }
 

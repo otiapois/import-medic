@@ -73,11 +73,16 @@ export function PricingFormula({ selection, error, worker, supplierId, sheetInde
   const result = preview?.request === request ? preview : undefined;
   const { fx, ...ruleWithoutFx } = rule;
   const { compareAtRule, ...ruleWithoutCompareAt } = rule;
-  const canKeepPrecision = rule.mode === 'direct' && rule.minimumRetail === undefined && !fx;
+  const { retailAdjustmentPercent, ...ruleWithoutRetailAdjustment } = rule;
+  const canKeepPrecision = rule.mode === 'direct' && rule.minimumRetail === undefined && retailAdjustmentPercent === undefined && !fx;
   const rounding = rule.rounding ?? (canKeepPrecision ? '' : 'none');
 
   function changeMode(mode: PricingRule['mode']) {
-    const options = { rounding: rule.rounding, minimumRetail: rule.minimumRetail, ...(fx ? { fx } : {}), ...(compareAtRule ? { compareAtRule } : {}) };
+    const options = {
+      rounding: rule.rounding, minimumRetail: rule.minimumRetail,
+      ...(retailAdjustmentPercent === undefined ? {} : { retailAdjustmentPercent }),
+      ...(fx ? { fx } : {}), ...(compareAtRule ? { compareAtRule } : {}),
+    };
     switch (mode) {
       case 'direct': onChange({ ...options, mode }); break;
       case 'multiplier': onChange({ ...options, mode, multiplier: '' }); break;
@@ -92,6 +97,7 @@ export function PricingFormula({ selection, error, worker, supplierId, sheetInde
       <summary><span>Pricing formula &amp; rounding</span>
         {hasPricingInstructions(rule) ? <span className={`issue-badge pricing-active ${confirmed ? 'badge-fixed' : 'badge-review'}`}>
           {confirmed ? 'Active' : 'Needs confirmation'} · {MODES[rule.mode]}{rounding ? ` · ${ROUNDING[rounding]}` : ''}
+          {retailAdjustmentPercent === undefined ? '' : ` · Retail adjustment ${retailAdjustmentPercent}%`}
         </span> : null}
       </summary>
       <p id={`${id}-help`} className="field-help">Use plain decimals with a period, such as 2.2 or 3.00. Changes clear row decisions. Select Confirm columns to apply these settings.</p>
@@ -116,6 +122,10 @@ export function PricingFormula({ selection, error, worker, supplierId, sheetInde
           </select>
         </label>
         <PricingAmount label="Minimum retail price (optional)" value={rule.minimumRetail ?? ''} placeholder="9.99" onChange={(minimumRetail) => onChange({ ...rule, minimumRetail: minimumRetail || undefined })} />
+        {retailAdjustmentPercent === undefined ? null : (
+          <PricingAmount label="Retail adjustment (%)" value={retailAdjustmentPercent} placeholder="5"
+            onChange={(value) => onChange(value ? { ...rule, retailAdjustmentPercent: value } : ruleWithoutRetailAdjustment)} />
+        )}
       </fieldset>
       {rule.mode === 'tiered-brackets' ? <TierBrackets rule={rule} error={error} onChange={(brackets) => onChange({ ...rule, brackets })} /> : null}
       <div className="pricing-option">
