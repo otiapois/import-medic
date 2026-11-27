@@ -50,8 +50,12 @@ export function ExportActions({ result, current, busy, guardEnabled, onGuard, on
       : '';
   return (
     <div className="export-actions">
-      <FormulaGuard checked={guardEnabled} disabled={!current || busy} onChange={onGuard}
-        description="Prefixes formula-like text with an apostrophe in the repaired CSV. Signed amounts stay unchanged." />
+      {result.platform === 'xero-bank' ? (
+        <p className="field-help">Spreadsheet formula protection is always on for Xero. The audit lists any escaped text cells.</p>
+      ) : (
+        <FormulaGuard checked={guardEnabled} disabled={!current || busy} onChange={onGuard}
+          description="Prefixes formula-like text with an apostrophe in the repaired CSV. Signed amounts stay unchanged." />
+      )}
       <p className="field-help" role="status" aria-busy={!current && busy}>
         {current ? `Audit preview · ${result.formulaGuard.neutralizedCount.toLocaleString('en-US')} spreadsheet formula cells neutralized.` : 'Audit preview updates after processing.'}
       </p>

@@ -5,7 +5,7 @@ import { z } from 'zod';
 import { sha256, type RepairCustody } from '../src/core/audit/custody';
 import { PLATFORM_IDS, repairCsvWithBytes } from '../src/core/index';
 
-const usage = `Usage: npm run repair-cli -- --platform <shopify-products|quickbooks-bank|stripe-paypal> <input.csv>
+const usage = `Usage: npm run repair-cli -- --platform <${PLATFORM_IDS.join('|')}> <input.csv>
   --output <repaired.csv>              Write CSV to a new file (default: stdout)
   --audit <audit.json>                 Write JSON audit to a new file
   --date-order <auto|MDY|DMY>           Source date order

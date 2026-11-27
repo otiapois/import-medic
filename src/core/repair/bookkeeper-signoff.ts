@@ -1,6 +1,6 @@
 import type { RepairCustody } from '../audit/custody';
 import { custodyFooter, escapeReportText as escape, offlineReportCsp } from '../report-html';
-import type { BookkeeperAmountRow, RepairOptions, RepairResult } from '../types';
+import type { BalanceChain, BookkeeperAmountRow, RepairOptions, RepairResult } from '../types';
 
 const rowLimit = 500;
 const detailLimit = 30;
@@ -97,13 +97,35 @@ function changesByLine(result: RepairResult) {
   return { lines, affectedCount: affected.size, fixedCount: fixed.size, editedCount: edited.size, flaggedCount: flagged.size, excludedCount: excluded.size };
 }
 
+function renderBalanceChain(chain: BalanceChain): string {
+  const { status, direction, currency, openingBalance, netMovement, closingBalance, verifiedLinks, totalLinks, breaks, reasons } = chain;
+  const headline = status === 'VERIFIED' ? `VERIFIED (${verifiedLinks}/${totalLinks} links)` :
+    status === 'FAIL_BALANCE_BREAK' ? `BALANCE BREAK at Line ${breaks[0].row}` : 'UNVERIFIABLE';
+  const balances = [
+    ['Opening Balance', openingBalance], ['Net Movement', netMovement], ['Closing Balance', closingBalance],
+  ] as const;
+  return `<section><h2>Running-Balance Chain Audit</h2>
+<p><strong class="${status === 'VERIFIED' ? 'chain-verified' : 'chain-held'}">${headline}</strong></p>
+<dl class="summary">${balances.map(([label, value]) => `<div><dt>${label}</dt><dd>${escape(value ?? 'Unavailable')}</dd></div>`).join('')}</dl>
+<p class="meta">Currency ${escape(currency ?? 'unspecified')} · Order ${escape(direction ?? 'undetermined')} · Verified Chain Links ${verifiedLinks}/${totalLinks}</p>
+${status === 'VERIFIED' && totalLinks === 0 ? '<p class="meta">The single transaction has no consecutive links to check.</p>' : ''}
+${breaks.length ? `<table><thead><tr><th scope="col">Line</th><th scope="col">Expected Balance</th><th scope="col">Actual Balance</th><th scope="col">Discrepancy</th></tr></thead><tbody>
+${breaks.slice(0, rowLimit).map(({ row, expected, actual, delta }) => `<tr><th scope="row">${row}</th><td>${escape(expected)}</td><td>${escape(actual)}</td><td>${escape(delta.startsWith('-') ? delta : '+' + delta)}</td></tr>`).join('')}
+</tbody></table>${breaks.length > rowLimit ? `<p>Showing ${rowLimit} of ${breaks.length} breaks. Download the full repair audit for every break.</p>` : ''}` : ''}
+${reasons.length ? `<ul>${reasons.slice(0, rowLimit).map(({ row, column, message }) => `<li>Line ${row} · ${boundedText(column)} · ${boundedText(message)}</li>`).join('')}</ul>
+${reasons.length > rowLimit ? `<p>Showing ${rowLimit} of ${reasons.length} reasons. Download the full repair audit for every reason.</p>` : ''}` : ''}
+</section>`;
+}
+
 export function createBookkeeperSignoffHtml(result: RepairResult, { generatedAt, detectedProvider, options, custody }: ReportContext): string {
   const fourColumn = options ? options.qboLayout === '4col' : result.headers.includes('Credit');
   const target = result.platform === 'shopify-products' ? 'Shopify products' :
-    result.platform === 'quickbooks-bank' ? `QuickBooks bank (${fourColumn ? '4-column' : '3-column'} target)` : 'Stripe / PayPal transactions';
+    result.platform === 'quickbooks-bank' ? `QuickBooks bank (${fourColumn ? '4-column' : '3-column'} target)` :
+    result.platform === 'xero-bank' ? 'Xero bank statement' :
+    result.platform === 'freshbooks-expenses' ? 'FreshBooks expenses' : 'Stripe / PayPal transactions';
   const { lines, affectedCount, fixedCount, editedCount, flaggedCount, excludedCount } = changesByLine(result);
   const { groups, included } = currencyGroup(result.bookkeeperAmounts);
-  const moneyFields = result.platform === 'quickbooks-bank' ? ['amount'] as const : ['gross', 'fee', 'net'] as const;
+  const moneyFields = result.platform === 'stripe-paypal' ? ['gross', 'fee', 'net'] as const : ['amount'] as const;
   const currencyRows = [...groups].sort(([left], [right]) => left.localeCompare(right)).map(([currency, { count, totals }]) => `<tr><th scope="row">${escape(currency)}</th><td>${count}</td>${moneyFields.map((field) => {
     const total = totals.get(field);
     return total ? `<td>${decimal(total)} <small>${total.count} ${total.count === 1 ? 'value' : 'values'}</small></td>` : '<td>—</td>';
@@ -121,6 +143,7 @@ export function createBookkeeperSignoffHtml(result: RepairResult, { generatedAt,
 h1{font-size:clamp(22px,4vw,34px);line-height:1.15}h2{font-size:18px;margin-top:1.5em}.meta{color:#435a5b}.summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,9rem),1fr));gap:8px}
 .summary div{padding:8px;border:1px solid #b7cac6;border-radius:6px;background:#f1f7f5}dt,th{font-weight:700}dd{margin:0;font-variant-numeric:tabular-nums}table{width:100%;table-layout:fixed;border-collapse:collapse}
 th,td{padding:6px;border:1px solid #b7cac6;text-align:left;vertical-align:top}th{background:#eaf3f1}.lines th:first-child{width:4rem}small{display:block;color:#435a5b}ul{padding-left:1.2rem;margin:0}
+.chain-verified{color:#236048}.chain-held{color:#8e2624}
 @media print{body{padding:0;font-size:11pt}.summary div,th{background:#fff}tr,.summary div{break-inside:avoid}thead{display:table-header-group}}
 </style></head><body><main>
 <h1>Bookkeeper Sign-Off</h1>
@@ -130,6 +153,7 @@ ${result.platform === 'stripe-paypal' && options?.stripePayPalOutput === 'quickb
 <p><strong>Repaired CSV</strong> ${result.canDownload ? 'Available' : 'Blocked'}</p>
 <dl class="summary">${metrics.map(([label, value]) => `<div><dt>${label}</dt><dd>${value}</dd></div>`).join('')}</dl>
 <p class="meta">Total rows include retained and excluded CSV records, after omitting the header record. Cell counts use distinct source cells. Layout, header, encoding and line-ending notices appear in the audit where applicable.</p>
+${result.balanceChain ? renderBalanceChain(result.balanceChain) : ''}
 <h2>Totals by currency</h2>
 ${currencyRows ? `<table><thead><tr><th scope="col">Currency</th><th scope="col">Lines</th>${moneyFields.map((field) => `<th scope="col">${field[0].toUpperCase() + field.slice(1)}</th>`).join('')}</tr></thead><tbody>${currencyRows}</tbody></table>` : '<p>No monetary totals are available.</p>'}
 ${result.platform === 'shopify-products' ? '<p class="meta">The product repair supplies no transaction amounts or currency totals.</p>' : `<p class="meta">Totals use validated source amounts under their explicit currency, before any export removes the source currency column. ${result.rows.length - included} retained ${result.rows.length - included === 1 ? 'line has' : 'lines have'} no reportable amount. A dash means that amount is unavailable for the currency.</p>`}
@@ -140,7 +164,11 @@ ${result.currencySplit ? `<section><h2>Currency split required</h2><p>Use a sepa
 <table><thead><tr><th scope="col">Currency</th><th scope="col">Lines</th><th scope="col">Physical source lines</th></tr></thead><tbody>
 ${result.currencySplit.map(({ currency, lines }) => `<tr><th scope="row">${escape(currency)}</th><td>${lines.length}</td><td>${lines.join(', ')}</td></tr>`).join('\n')}
 </tbody></table></section>` : ''}
-${custody ? custodyFooter([['Source CSV', custody.sourceSha256], ['Repaired CSV', custody.repairedCsvSha256]]) : ''}
+${result.freshBooksTaxes ? `<section><h2>FreshBooks tax review</h2><p>Source tax fields are recorded here for review. Confirm or add taxes in FreshBooks after the expense import.</p>
+<table><thead><tr><th scope="col">Line</th><th scope="col">Tax 1 Name</th><th scope="col">Tax 1 Amount</th></tr></thead><tbody>
+${result.freshBooksTaxes.slice(0, rowLimit).map(({ row, name, amount }) => `<tr><th scope="row">${row}</th><td>${boundedText(name)}</td><td>${boundedText(amount)}</td></tr>`).join('')}
+</tbody></table>${result.freshBooksTaxes.length > rowLimit ? `<p>Showing ${rowLimit} of ${result.freshBooksTaxes.length} lines. Download the full repair audit for every line.</p>` : ''}</section>` : ''}
+${custody ? custodyFooter([['Source CSV', custody.sourceSha256], ['Repaired CSV', result.canDownload ? custody.repairedCsvSha256 : undefined]]) : ''}
 </main></body></html>
 `;
 }

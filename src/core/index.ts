@@ -2,10 +2,12 @@ import { decodeCsv, parseCsv, serializeCsv } from './csv';
 import { guardSpreadsheetRow } from './formula-guard';
 import type { FormulaGuardCell } from './formula-guard';
 import { Journal } from './journal';
+import { freshBooksAliases, repairFreshBooks } from './profiles/freshbooks-expenses';
 import { quickBooksAliases, repairQuickBooks, stripBankStatement } from './profiles/quickbooks-bank';
 import { repairShopify, shopifyAliases, shopifyPaddingColumns } from './profiles/shopify-products';
 import { repairStripePayPal, resolveFeeConvention, stripePayPalAliases } from './profiles/stripe-paypal';
-import { findSourceColumn, readTable } from './table';
+import { repairXero, xeroAliases } from './profiles/xero-bank';
+import { canonicalHeader, findSourceColumn, readTable } from './table';
 import type { FeeConvention, ManualCellEdit, PlatformId, RepairOptions, RepairResult, RoundtripCheck } from './types';
 
 export * from './types';
@@ -15,6 +17,8 @@ const aliases = {
   'shopify-products': shopifyAliases,
   'quickbooks-bank': quickBooksAliases,
   'stripe-paypal': stripePayPalAliases,
+  'xero-bank': xeroAliases,
+  'freshbooks-expenses': freshBooksAliases,
 };
 
 export function getSourceColumn(platform: PlatformId, sourceHeaders: readonly string[], column: string): string | undefined {
@@ -45,10 +49,13 @@ function runPass(bytes: Uint8Array, platform: PlatformId, options: RepairOptions
     }
   }
 
-  const source = platform === 'quickbooks-bank' ? stripBankStatement(records, journal) : records;
+  const bankProfile = platform === 'quickbooks-bank' || platform === 'xero-bank';
+  const source = bankProfile ? stripBankStatement(records, journal) : records;
+  const header = bankProfile ? source.find(({ cells, parseError }) => parseError || cells.some(Boolean)) : undefined;
   const table = readTable(source, aliases[platform], journal, edits, {
     fixWindowsPunctuation: encoding === 'windows-1252',
     paddingColumns: platform === 'shopify-products' ? shopifyPaddingColumns : undefined,
+    keepDelimitedEmptyRows: header?.cells.some((column) => canonicalHeader(column, aliases[platform]) === 'Balance'),
   });
 
   let headers = table.headers;
@@ -62,6 +69,10 @@ function runPass(bytes: Uint8Array, platform: PlatformId, options: RepairOptions
       const qbo = repairQuickBooks(table, journal, options);
       headers = qbo.headers;
       exportOptions = { ...options, dateOrder: qbo.dateOrder, qboCreditDebit: 'intuit' };
+    } else if (platform === 'xero-bank') {
+      headers = repairXero(table, journal, options);
+    } else if (platform === 'freshbooks-expenses') {
+      headers = repairFreshBooks(table, journal, options, collectBookkeeperAmounts);
     } else {
       feeConvention = resolveFeeConvention(table.sourceHeaders, options.stripePayPalFeeConvention);
       headers = repairStripePayPal(table, journal, options, feeConvention);
@@ -89,7 +100,7 @@ export function repairCsvWithBytes(
   const pass = runPass(bytes, platform, options, edits, platform !== 'shopify-products');
   const { journal, sourceHeaders } = pass;
   let { headers, rows } = pass;
-  const enabled = options.formulaGuard === true;
+  const enabled = platform === 'xero-bank' || options.formulaGuard === true;
   const guardChanges: FormulaGuardCell[] = [];
   const roundtripCheck: RoundtripCheck = { checked: false, autoFixableRemaining: null, needsManualReviewCount: null };
   let repairedCsv = '';
@@ -135,6 +146,8 @@ export function repairCsvWithBytes(
     roundtripCheck,
     formulaGuard: { enabled, neutralized: repairedCsv ? guardChanges : [], blocked: repairedCsv ? [] : guardChanges },
     bookkeeperAmounts: journal.bookkeeperAmounts ?? [],
+    ...(journal.balanceChain && { balanceChain: journal.balanceChain }),
+    ...(journal.freshBooksTaxes && { freshBooksTaxes: journal.freshBooksTaxes }),
     ...(journal.currencySplit && { currencySplit: journal.currencySplit }),
     ...(pass.feeConvention && { stripePayPalFeeConvention: pass.feeConvention }),
   };

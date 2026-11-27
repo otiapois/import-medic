@@ -1,6 +1,6 @@
 # ImportMedic
 
-ImportMedic compares a Shopify, WooCommerce, or legacy BigCommerce product export with one to three supplier CSV or XLSX files in your browser. Use supplier prices directly or calculate retail prices from wholesale costs, with optional manual currency conversion, cost brackets, and stock updates where supported. Review proposed changes and competing offers before downloading matched update and rollback CSVs, audits, or a standalone Client Sign-Off HTML report. Save supplier mappings and store defaults as separate JSON files. A separate workbench repairs Shopify Products, QuickBooks Online Bank, and Stripe or PayPal CSVs and offers a printable Bookkeeper Sign-Off HTML report.
+ImportMedic compares a Shopify, WooCommerce, or legacy BigCommerce product export with one to three supplier CSV or XLSX files in your browser. Use supplier prices directly or calculate retail prices from wholesale costs, with optional manual currency conversion, cost brackets, and stock updates where supported. Review proposed changes and competing offers before downloading matched update and rollback CSVs, audits, or a standalone Client Sign-Off HTML report. Save supplier mappings and store defaults as separate JSON files. A separate workbench repairs Shopify Products, QuickBooks Online Bank, Stripe or PayPal, Xero bank statement, and FreshBooks expense CSVs and offers a printable Bookkeeper Sign-Off HTML report.
 
 **Verify Before Import** inspects an existing update or rollback CSV against the original Shopify, WooCommerce, or legacy BigCommerce export. It checks product identity and grouping, shows exact changes in the allowed price or stock cells, and fingerprints both files in the browser. Store checks and imports take place in the store's admin.
 
@@ -114,13 +114,25 @@ Open **Workspace profile** and set the store name and currency. Select **Save Wo
 
 ### Guard spreadsheet formulas
 
-**Guard spreadsheet formulas (=, +, -, @)** is off by default. For a single-file repair CSV, turning it on prefixes an apostrophe to formula-like text in the exported cells, leaves signed decimal values such as `-12.50` unchanged by the guard, and records each changed cell in the audit. The Shopify price workbench blocks the native pair if guarding would change a value carried into it. The audit remains available.
+**Guard spreadsheet formulas (=, +, -, @)** is optional in most single-file repairs and always applied for Xero bank CSVs. The guard prefixes an apostrophe to formula-like text in the exported cells, preserves signed decimal values such as `-12.50`, and records each changed cell in the audit. The Shopify price workbench blocks the native pair if guarding would change a value carried into it. The audit remains available.
+
+### Prepare Xero bank statements and FreshBooks expenses
+
+On the home workbench, choose **Xero Bank CSV** for a single bank account's statement. Confirm the source **Date format** if a date such as `04/05/2026` could mean two different days. ImportMedic writes `YYYY/MM/DD` in `*Date` and puts incoming and outgoing transactions in the signed `*Amount` column. Use Xero's bank statement import screen to review the mapping, optional details, and date format. Source running balances are used in the local check and left out of the import CSV. [Xero bank statement CSV guidance](https://central.xero.com/0/article/Import-a-CSV-bank-statement)
+
+Choose **FreshBooks CSV** for an expense file with one explicit currency and amounts of the same sign. Check that all rows describe expenses. FreshBooks' expense importer can omit positive amounts in a mixed-sign file, so ImportMedic holds that file for review. In FreshBooks, map `Vendor` to Merchant, `Notes` to Description, and match Date, Category, and Amount directly. Select the file's currency and year-first date format. The file retains the recorded tax fields for review. Apply taxes using the FreshBooks expense editor where needed. Signed transactions for Bank Reconciliation use a separate FreshBooks import flow. [FreshBooks expense imports](https://support.freshbooks.com/hc/en-us/articles/360001651111-How-do-I-import-expenses-from-a-file) · [FreshBooks Bank Reconciliation](https://support.freshbooks.com/hc/en-us/articles/6787282269325-How-do-I-add-edit-or-delete-manual-transactions-in-bank-reconciliation)
+
+### Check a running bank balance
+
+When a QuickBooks or Xero bank source has `Balance` or `Running Balance`, open **Running-Balance Chain Audit**. ImportMedic checks adjacent rows in exact minor units, such as cents for USD, and interprets same-day rows in the detected statement direction. Confirm the source date order and amount directions before relying on the check. A balance break or a chain the workbench cannot verify holds the CSV. Review the physical source lines and re-export the original statement or correct a confirmed transcription error. A line break inside a quoted description counts toward the file's physical line numbers.
+
+The check measures consistency between the rows supplied. The opening balance is derived from the first transaction in time. Confirm the statement period and account balances against the bank, since omitted transactions outside the supplied range or gaps that cancel to zero can pass the arithmetic check. [Running-balance contract](docs/subsystems/csv-engine.md#running-balance-chain)
 
 ### Prepare a bookkeeper sign-off
 
 Open the home workbench, select the platform, and repair the CSV. For a Stripe or PayPal reconciliation mismatch, review Gross, Fee, Net, and the expected Net on the original source line. Correct the source or re-export it from the provider before retrying. If you reopen a generic accounting CSV with confirmed PayPal signed fees, select the PayPal option under **Fee convention**. If multiple currencies prevent a QuickBooks bank export, use the counts and physical lines in **Mixed currencies block QuickBooks export** to locate transactions in the source. Prepare a separate input for each currency and check it again before using the bank layout.
 
-Use **Download Bookkeeper Sign-Off (.html)** to open or print the standalone report locally, including for a held CSV. It shows the source and platform, automatic and manual edit counts, physical CSV lines for audit, exclusions, and totals by verified currency where available. It also includes any reconciliation mismatch details or currency breakdown for review. Keep the report with the source file and the CSV or audit needed for review.
+Use **Download Bookkeeper Sign-Off (.html)** to open or print the standalone report locally, including for a held CSV. It records the current repair state, source and platform, automatic and manual edit counts, physical CSV lines, exclusions, and totals by verified currency where available. Reconciliation mismatches, currency groups, and running-balance results appear when applicable. Keep the current report with its source file and JSON audit. When the CSV is held, the report carries the original file fingerprint only.
 
 ### Verify file fingerprints
 

@@ -333,7 +333,7 @@ async function run(request: WorkerRequest, progress: Progress, ensureCurrent: ()
       }
       const views = indexRepairViews(result);
       repair = { result, options: request.options, views, suggestions, verifiedBytes, custody };
-      const { rows, removedRows, issues, changes, repairedCsv: _, formulaGuard, bookkeeperAmounts: _amounts, ...metadata } = result;
+      const { rows, removedRows, issues, changes, repairedCsv: _, formulaGuard, bookkeeperAmounts: _amounts, freshBooksTaxes: _taxes, ...metadata } = result;
       let fixed = 0;
       let warnings = 0;
       for (const issue of issues) {

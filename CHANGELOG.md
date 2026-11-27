@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.5.0 (M15)
+
+- Choose **Xero Bank CSV** or **FreshBooks CSV** in the local repair workbench. Prepare a Xero bank statement CSV or a FreshBooks expense CSV with explicit field mapping and a single currency. Resolve ambiguous source dates before export.
+- Check a source running balance in QuickBooks and Xero bank repairs. The verifier follows the statement's date order and compares adjacent transactions in exact minor units. A discrepancy as small as one cent on a USD statement holds the CSV and reports the physical source line, expected and actual balances, and signed difference.
+- Review the current balance check in the workbench, JSON audit, and offline Bookkeeper Sign-Off. Held CSVs retain the source fingerprint and review evidence. The repaired CSV fingerprint is included when a verified export is available.
+
 ## v1.4.0 (M14)
 
 - Open **Migrate Catalog** in the price workbench to convert a supported catalog CSV in any of the six directions between Shopify, WooCommerce, and BigCommerce. Review exact SKU text, parent and variant grouping, and the conversion between Shopify compare-at prices and regular and sale prices.

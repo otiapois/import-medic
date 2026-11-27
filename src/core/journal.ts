@@ -10,6 +10,8 @@ export class Journal {
   blocked = false;
   readonly bookkeeperAmounts?: BookkeeperAmountRow[];
   currencySplit?: RepairResult['currencySplit'];
+  balanceChain?: RepairResult['balanceChain'];
+  freshBooksTaxes?: RepairResult['freshBooksTaxes'];
 
   constructor(private readonly platform: PlatformId, collectBookkeeperAmounts = false) {
     if (collectBookkeeperAmounts) this.bookkeeperAmounts = [];

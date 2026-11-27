@@ -25,12 +25,16 @@ const PLATFORMS = [
   { id: 'shopify-products', label: 'Shopify Products' },
   { id: 'quickbooks-bank', label: 'QuickBooks Bank' },
   { id: 'stripe-paypal', label: 'Stripe / PayPal' },
+  { id: 'xero-bank', label: 'Xero Bank CSV' },
+  { id: 'freshbooks-expenses', label: 'FreshBooks CSV' },
 ] as const;
 
 const DEFAULT_OPTIONS: Record<PlatformId, RepairOptions> = {
   'shopify-products': {},
   'quickbooks-bank': { qboLayout: '3col', dateOrder: 'auto', qboCreditDebit: 'auto' },
   'stripe-paypal': { dateOrder: 'auto', stripePayPalOutput: 'accounting', excludePayPalMemo: false, stripePayPalFeeConvention: 'auto' },
+  'xero-bank': { dateOrder: 'auto' },
+  'freshbooks-expenses': { dateOrder: 'auto' },
 };
 
 type SourceFile = { filename: string } & ({ sample: true; bytes: Uint8Array } | { sample: false; file: File });
@@ -48,6 +52,8 @@ export function Workbench({ initialPlatform }: { initialPlatform: PlatformId }) 
   const loaded = useRef<{ source: SourceFile; worker: WorkbenchWorker } | null>(null);
   const { run, invalidate, reset, cancel, resume, paused, progress, error, finished } = useWorkerSession();
   const options = platformOptions[platform];
+  const isXero = platform === 'xero-bank';
+  const isFreshBooks = platform === 'freshbooks-expenses';
   const inputs = useMemo(() => ({ source, platform, options, edits }), [source, platform, options, edits]);
   const [report, setReport] = useState<{ result: RepairSummary; worker: WorkbenchWorker; inputs: typeof inputs } | null>(null);
   const current = !paused && report?.inputs === inputs;
@@ -89,6 +95,7 @@ export function Workbench({ initialPlatform }: { initialPlatform: PlatformId }) 
   function loadFile(files: FileList) {
     if (!files.length) return;
     if (files.length !== 1 || !/\.csv$/i.test(files[0].name)) {
+      replaceSource(null);
       setFileError('Choose one file with a .csv extension.');
       return;
     }
@@ -188,7 +195,9 @@ export function Workbench({ initialPlatform }: { initialPlatform: PlatformId }) 
                 type="button"
                 onClick={() => replaceSource({ ...getSample(platform), sample: true })}
               >
-                Try a Broken Sample CSV
+                {isXero ? 'Load Synthetic Xero Balance Break Demo'
+                  : isFreshBooks ? 'Load Synthetic FreshBooks Sample'
+                    : 'Try a Broken Sample CSV'}
               </button>
               {source ? (
                 <div className="selected-file">
@@ -272,6 +281,17 @@ export function Workbench({ initialPlatform }: { initialPlatform: PlatformId }) 
                 </label>
                 <p className="field-help" id={`${id}-fee-help`}>If your export has generic headers, choose the convention used by the source report.</p>
               </fieldset>
+            ) : isXero || isFreshBooks ? (
+              <fieldset className="repair-options">
+                <legend>Import settings</legend>
+                <DateFormatField value={options.dateOrder} onChange={(value) => updateOption('dateOrder', value)} helpId={`${id}-date-help`} />
+                <p className="field-help" id={`${id}-date-help`}>Choose the date order used by the source for dates like 04/05/2026.</p>
+                {isXero ? (
+                  <p className="field-help">Import into the Xero bank account for the source currency. Include a Balance or Running Balance column to verify the chain.</p>
+                ) : (
+                  <p className="field-help">In FreshBooks Expenses, map Merchant to Vendor and Description to Notes. Use the account currency. The Expenses importer reads only the negative rows in a mixed-sign file. Check the transaction types before preparing separate imports.</p>
+                )}
+              </fieldset>
             ) : (
               <div className="platform-note">
                 <h3>Shopify Products CSV</h3>
@@ -299,11 +319,16 @@ export function Workbench({ initialPlatform }: { initialPlatform: PlatformId }) 
   );
 }
 
-function DateFormatField({ value, onChange }: { value: DateOrder | undefined; onChange: (value: DateOrder) => void }) {
+function DateFormatField({ value, onChange, helpId }: {
+  value: DateOrder | undefined;
+  onChange: (value: DateOrder) => void;
+  helpId?: string;
+}) {
+  const id = useId();
   return (
-    <label>
-      Date format
-      <select value={value} onChange={(event) => onChange(event.currentTarget.value as DateOrder)}>
+    <label htmlFor={id}>
+      <span id={`${id}-label`}>Date format</span>
+      <select id={id} value={value} aria-labelledby={`${id}-label`} aria-describedby={helpId} onChange={(event) => onChange(event.currentTarget.value as DateOrder)}>
         <option value="auto">Auto (Fail-Closed)</option>
         <option value="MDY">MM/DD/YYYY</option>
         <option value="DMY">DD/MM/YYYY</option>

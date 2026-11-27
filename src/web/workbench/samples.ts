@@ -27,6 +27,22 @@ const SAMPLES = {
       '2026-11-25T05:01:00Z,Workshop ticket,40.00,1.46,38.54,USD,txn_demo201',
     ],
   },
+  'xero-bank': {
+    filename: 'synthetic-xero-balance-break.csv',
+    lines: [
+      '*Date,*Amount,Payee,Description,Reference,Check Number,Running Balance,Currency',
+      '2026-11-24,100.00,North Studio,Deposit,00021,,1100.00,USD',
+      '2026-11-25,(45.20),Harbor Supply,Materials,00022,0009,1054.80,USD',
+      '2026-11-27,-20.00,Cedar Transit,Delivery,00024,,1047.30,USD',
+    ],
+  },
+  'freshbooks-expenses': {
+    filename: 'synthetic-freshbooks-expenses.csv',
+    lines: [
+      'Date,Vendor,Category,Notes,Amount,Tax 1 Name,Tax 1 Amount,Currency',
+      '04/05/2026,Harbor Supply,Materials,Studio materials,45.20,,,USD',
+    ],
+  },
 } satisfies Record<PlatformId, { filename: string; lines: string[] }>;
 
 export function getSample(platform: PlatformId) {

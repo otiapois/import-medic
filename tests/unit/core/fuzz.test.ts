@@ -1389,7 +1389,169 @@ describe('M14 catalog migration', () => {
   }
 });
 
-it('accounts for all 22,620 seeded executions without skips', () => {
-  expect(fuzzExecutions).toEqual({ accepted: 22_620, discarded: 0, properties: 41 });
+describe('M15 exact bank and expense repair', () => {
+  const movement = fc.bigInt({ min: -999_999n, max: 999_999n }).map((value) => value === 0n ? 1n : value);
+  const openingValue = fc.bigInt({ min: -(10n ** 26n), max: 10n ** 26n });
+
+  it('replays 900 Xero sign, chronology, missing movement and cent-tamper cases', () => {
+    checkFuzz(fc.property(
+      openingValue, fc.array(movement, { minLength: 3, maxLength: 7 }), fc.boolean(),
+      fc.constantFrom('valid', 'penny', 'missing', 'date', 'symbols', 'precision'),
+      (opening, amounts, descending, mode) => {
+        let balance = opening;
+        const chronological = amounts.map((amount, index) => {
+          balance += amount;
+          const sourceAmount = amount < 0n ? index % 2 === 0 ? `(${cents(-amount)})` : `${cents(-amount)}-` : cents(amount);
+          return [`2026-05-0${index + 1}`, sourceAmount, index === 0 ? '=display\ncontinued' : 'Record ' + index, cents(balance), `0000${index}`];
+        });
+        const last = chronological.at(-1)!;
+        let affected: string[] | undefined;
+        let delta = 0n;
+        if (mode === 'penny') {
+          last[3] = cents(balance - 1n);
+          affected = last;
+          delta = -1n;
+        } else if (mode === 'missing') {
+          chronological.splice(1, 1);
+          affected = chronological[1];
+          delta = amounts[1];
+        } else if (mode === 'date') last[0] = '04/05/2026';
+        else if (mode === 'symbols') {
+          last[1] = amounts.at(-1)! < 0n ? `(£${cents(-amounts.at(-1)!)})` : '£' + cents(amounts.at(-1)!);
+          last[3] = balance < 0n ? '-$' + cents(-balance) : '$' + cents(balance);
+        } else if (mode === 'precision') last[3] += '1';
+
+        const ordered = descending ? chronological.slice().reverse() : chronological;
+        const source = serializeCsv(['Date', 'Amount', 'Payee', 'Running Balance', 'Reference'], ordered, 'xero-bank');
+        const result = repairCsv(bytes(source), 'xero.csv', 'xero-bank', { formulaGuard: false });
+        expect(result.balanceChain?.totalLinks).toBe(ordered.length - 1);
+        expect(result.balanceChain?.currency).toBeNull();
+        if (mode === 'valid') {
+          expect(result.canDownload).toBe(true);
+          expect(result.balanceChain).toMatchObject({
+            status: 'VERIFIED', direction: descending ? 'descending' : 'ascending', openingBalance: cents(opening),
+            netMovement: cents(balance - opening), closingBalance: cents(balance), verifiedLinks: ordered.length - 1, breaks: [],
+          });
+          const output = parseCsv(result.repairedCsv).records;
+          expect(output[0].cells).toEqual(['*Date', '*Amount', 'Payee', 'Reference']);
+          expect(output.slice(1).map(({ cells }) => cells[1])).toEqual((descending ? amounts.slice().reverse() : amounts).map(cents));
+          expect(output.slice(1).map(({ cells }) => cells[3])).toEqual(ordered.map((row) => row[4]));
+          expect(output.some(({ cells }) => cells[2] === "'=display\ncontinued")).toBe(true);
+        } else {
+          expect(result.canDownload).toBe(false);
+          expect(result.repairedCsv).toBe('');
+          if (affected) {
+            const affectedLine = parseCsv(source).records[ordered.indexOf(affected) + 1].line;
+            expect(result.balanceChain).toMatchObject({
+              status: 'FAIL_BALANCE_BREAK', verifiedLinks: ordered.length - 2,
+              breaks: [{ row: affectedLine, delta: cents(delta) }],
+            });
+          } else {
+            expect(result.balanceChain?.status).toBe('UNVERIFIABLE');
+            if (mode === 'date') expect(result.issues.some(({ code }) => code === 'date-order-ambiguous')).toBe(true);
+            if (mode === 'symbols') expect(result.issues.some(({ code }) => code === 'multi-currency')).toBe(true);
+          }
+        }
+      },
+    ), { seed: seed + 41, numRuns: 900 });
+  }, 60_000);
+
+  it('replays 850 QuickBooks signed and split cases in both chronological directions', () => {
+    checkFuzz(fc.property(
+      openingValue, movement, movement, movement, fc.boolean(), fc.boolean(),
+      fc.constantFrom('signed', 'bank', 'intuit'), fc.constantFrom('valid', 'flipped', 'duplicate', 'invalid-date', 'invalid-balance', 'mixed'),
+      (opening, first, second, third, descending, targetFour, layout, mode) => {
+        let balance = opening;
+        const canonical = [first, second, third].map((amount, index) => {
+          balance += amount;
+          return [`2026-05-0${index + 1}`, index === 0 ? 'first\nrecord' : 'line ' + index, cents(amount), cents(balance), 'USD'];
+        });
+        const affected = canonical[1];
+        if (mode === 'flipped') affected[2] = cents(-second);
+        if (mode === 'duplicate') canonical.splice(1, 0, affected.slice());
+        if (mode === 'invalid-date') affected[0] = '2026-02-30';
+        if (mode === 'invalid-balance') affected[3] = '1e30';
+        if (mode === 'mixed') affected[4] = 'EUR';
+        if (descending) canonical.reverse();
+        const isSplit = layout !== 'signed';
+        const rows = isSplit ? canonical.map(([date, description, amount, after, currency]) => {
+          const negative = amount.startsWith('-');
+          const spent = negative ? amount.slice(1) : '';
+          const received = negative ? '' : amount;
+          return [date, description, ...(layout === 'bank' ? [received, spent] : [spent, received]), after, currency];
+        }) : canonical;
+        const source = serializeCsv(['Date', 'Description', ...(isSplit ? ['Credit', 'Debit'] : ['Amount']), 'Balance', 'Currency'], rows, 'quickbooks-bank');
+        const result = repairCsv(bytes(source), 'bank.csv', 'quickbooks-bank', {
+          qboLayout: targetFour ? '4col' : '3col', qboCreditDebit: isSplit ? layout : 'auto',
+        });
+        expect(result.balanceChain?.totalLinks).toBe(rows.length - 1);
+        if (mode === 'valid') {
+          expect(result.canDownload).toBe(true);
+          expect(result.balanceChain).toMatchObject({
+            status: 'VERIFIED', direction: descending ? 'descending' : 'ascending', currency: 'USD',
+            openingBalance: cents(opening), netMovement: cents(first + second + third), closingBalance: cents(balance), verifiedLinks: 2,
+          });
+          const [header, ...output] = parseCsv(result.repairedCsv).records;
+          expect(header.cells).toEqual(targetFour ? ['Date', 'Description', 'Credit', 'Debit'] : ['Date', 'Description', 'Amount']);
+          expect(output.map(({ cells }) => targetFour ? cells[2] ? '-' + cells[2] : cells[3] : cells[2])).toEqual(canonical.map((row) => row[2]));
+        } else {
+          expect(result.canDownload).toBe(false);
+          expect(result.repairedCsv).toBe('');
+          if (mode === 'flipped') {
+            const expectedLine = parseCsv(source).records[canonical.indexOf(affected) + 1].line;
+            expect(result.balanceChain).toMatchObject({ status: 'FAIL_BALANCE_BREAK', breaks: [{ row: expectedLine, delta: cents(2n * second) }] });
+          } else if (mode === 'duplicate') {
+            expect(result.balanceChain).toMatchObject({ status: 'FAIL_BALANCE_BREAK', breaks: [{ delta: cents(-second) }] });
+            expect(result.balanceChain?.reasons.some(({ message }) => message.includes('duplicates source line'))).toBe(true);
+          } else {
+            expect(result.balanceChain?.status).toBe('UNVERIFIABLE');
+            if (mode === 'mixed') expect(result.balanceChain?.currency).toBeNull();
+          }
+        }
+      },
+    ), { seed: seed + 42, numRuns: 850 });
+  }, 60_000);
+
+  it('replays 850 FreshBooks exact signed, explicit currency and date-order cases', () => {
+    checkFuzz(fc.property(
+      movement, movement, fc.boolean(), fc.boolean(), fc.constantFrom('USD', 'GBP', 'AED', 'CAD', 'EUR'),
+      fc.constantFrom('valid', 'mixed-sign', 'mixed-currency', 'unknown-currency', 'missing-currency', 'date', 'subcent'),
+      (first, second, negative, guard, currency, mode) => {
+        const absolute = (amount: bigint) => amount < 0n ? -amount : amount;
+        const sign = negative ? -1n : 1n;
+        const firstAmount = absolute(first) * sign;
+        const secondAmount = absolute(second) * (mode === 'mixed-sign' ? -sign : sign);
+        const secondValue = cents(secondAmount) + (mode === 'subcent' ? '1' : '');
+        const secondCurrency = mode === 'mixed-currency' ? currency === 'EUR' ? 'USD' : 'EUR' :
+          mode === 'unknown-currency' ? 'ZZZ' : mode === 'missing-currency' ? '' : currency;
+        const source = csvBytes(['Date', 'Merchant', 'Category', 'Description', 'Amount', 'Tax Name', 'Tax Amount', 'Currency'], [
+          ['2026-05-01', '=vendor', 'Supplies', 'with\nnewline', cents(firstAmount), 'Tax', '2.50', currency.toLowerCase()],
+          [mode === 'date' ? '04/05/2026' : '2026-05-03', 'Other', 'Supplies', 'Second', secondValue, 'Tax', '3.50', secondCurrency],
+        ]);
+        const result = repairCsv(source, 'expenses.csv', 'freshbooks-expenses', { formulaGuard: guard });
+        expect(result.balanceChain).toBeUndefined();
+        expect(result.freshBooksTaxes).toEqual([{ row: 2, name: 'Tax', amount: '2.50' }, { row: 4, name: 'Tax', amount: '3.50' }]);
+        if (mode === 'valid') {
+          expect(result.canDownload).toBe(true);
+          const cells = parseCsv(result.repairedCsv).records.map(({ cells: row }) => row);
+          expect(cells[1]).toEqual(['2026-05-01', guard ? "'=vendor" : '=vendor', 'Supplies', 'with\nnewline', cents(firstAmount), 'Tax', '2.50', currency]);
+          expect(cells[2][4]).toBe(cents(secondAmount));
+          expect(cells[2][7]).toBe(currency);
+        } else {
+          const issue = {
+            'mixed-sign': 'freshbooks-mixed-sign', 'mixed-currency': 'multi-currency', 'unknown-currency': 'invalid-currency',
+            'missing-currency': 'invalid-currency', date: 'date-order-ambiguous', subcent: 'freshbooks-amount-scale',
+          }[mode];
+          expect(result.canDownload).toBe(false);
+          expect(result.repairedCsv).toBe('');
+          expect(result.issues).toContainEqual(expect.objectContaining({ code: issue, row: 4 }));
+        }
+      },
+    ), { seed: seed + 43, numRuns: 850 });
+  }, 60_000);
+});
+
+it('accounts for all 25,220 seeded executions without skips', () => {
+  expect(fuzzExecutions).toEqual({ accepted: 25_220, discarded: 0, properties: 44 });
   console.info(`Deterministic fuzz: ${fuzzExecutions.accepted} accepted, ${fuzzExecutions.discarded} discarded across ${fuzzExecutions.properties} properties.`);
 });

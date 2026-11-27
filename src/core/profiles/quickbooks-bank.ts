@@ -1,8 +1,9 @@
+import { auditBankBalance, type BankMovement } from '../accounting/balance-chain';
 import type { CsvRecord } from '../csv';
 import type { Journal } from '../journal';
 import { auditProjection, columnIndex, headerAliases, requireColumn, type Table, type WorkingRow } from '../table';
 import type { DateOrder, RepairOptions } from '../types';
-import { amountCurrencySymbol, inferDateOrder, isZeroAmount, normalizeAmount, normalizeDate, normalizeDescription, repairAmount, reviewCurrencies } from '../values';
+import { inferDateOrder, isZeroAmount, normalizeAmount, normalizeDescription, repairAmount, repairDate, reviewAmountSymbols, reviewCurrencies } from '../values';
 
 export const quickBooksAliases = headerAliases({
   Date: ['Transaction Date', 'Post Date', 'Posted Date', 'Posting Date'],
@@ -13,6 +14,7 @@ export const quickBooksAliases = headerAliases({
   Debit: ['Debit Amount'],
   'Money In': ['Deposit', 'Deposits', 'Money Received'],
   'Money Out': ['Withdrawal', 'Withdrawals', 'Money Spent'],
+  Balance: ['Running Balance'],
 });
 
 export const QUICKBOOKS_3COL = ['Date', 'Description', 'Amount'];
@@ -25,7 +27,8 @@ export function stripBankStatement(records: readonly CsvRecord[], journal: Journ
   let start = 0;
   let end = records.length;
   const isBlank = (record: CsvRecord) => !record.parseError && record.raw.trim() === '';
-  while (start < end && (isBlank(records[start]) || (!records[start].parseError && preamble.has(recordLabel(records[start]))))) {
+  while (start < end && (isBlank(records[start]) ||
+    (!records[start].parseError && records[start].cells.length <= 2 && preamble.has(recordLabel(records[start]))))) {
     const record = records[start++];
     journal.remove(isBlank(record) ? 'blank-row' : 'bank-preamble', record, 'Removed a non-transaction record before the bank header.');
   }
@@ -128,33 +131,26 @@ function convertAmounts(row: WorkingRow, source: SourceAmount, splitTarget: bool
   return [signed];
 }
 
-function reviewAmountSymbols(rows: readonly WorkingRow[], source: SourceAmount, journal: Journal) {
-  const columns = 'signed' in source ? [source.signed] : [source.spent, source.received];
-  let reference: string | undefined;
-  for (const row of rows) {
-    for (const { index, name } of columns) {
-      const raw = row.cells[index];
-      const symbol = amountCurrencySymbol(raw);
-      if (!symbol) continue;
-      reference ??= symbol;
-      if (symbol !== reference) {
-        journal.issue('multi-currency', row.source.line, name, raw, `Found ${symbol} alongside ${reference} in the bank amounts. Use a source file for one account currency.`, { block: true });
-      }
-    }
-  }
-}
-
 export function repairQuickBooks(table: Table, journal: Journal, options: RepairOptions): { headers: string[]; dateOrder: Exclude<DateOrder, 'auto'> } {
   const date = requireColumn(table, 'Date', journal);
   const description = requireColumn(table, 'Description', journal);
   const amount = sourceAmount(table, journal, options);
   const dateOrder = options.dateOrder === 'DMY' ? 'DMY' : 'MDY';
-  if (date === undefined || description === undefined || !amount) return { headers: table.headers, dateOrder };
+  const balance = columnIndex(table, 'Balance');
+  const movements = new Map<WorkingRow, BankMovement>();
+  if (date === undefined || description === undefined || !amount) {
+    auditBankBalance(table, journal, movements, 'Date');
+    return { headers: table.headers, dateOrder };
+  }
 
   const rows = table.rows.filter(({ invalid }) => !invalid);
   const currency = columnIndex(table, 'Currency');
-  if (currency === undefined) reviewAmountSymbols(rows, amount, journal);
-  const currencyCodes = currency === undefined ? undefined : reviewCurrencies(rows, currency, journal, true);
+  if (currency === undefined) {
+    const columns = 'signed' in amount ? [amount.signed] : [amount.spent, amount.received];
+    if (balance !== undefined) columns.push({ index: balance, name: 'Balance' });
+    reviewAmountSymbols(rows, columns, journal, balance !== undefined);
+  }
+  const currencyCodes = currency === undefined ? undefined : reviewCurrencies(rows, currency, journal, true, balance !== undefined);
   const sourceOrder = inferDateOrder(rows.map(({ cells }) => cells[date]), options.dateOrder);
   const outputOrder = dateOrder;
   const split = options.qboLayout === '4col';
@@ -170,19 +166,24 @@ export function repairQuickBooks(table: Table, journal: Journal, options: Repair
   for (const row of rows) {
     const line = row.source.line;
     const currencyCode = currencyCodes?.get(row);
-    const dateValue = normalizeDate(row.cells[date], journal, { row: line, column: 'Date' }, sourceOrder, outputOrder);
+    const dateValue = repairDate(row.cells[date], journal, { row: line, column: 'Date' }, sourceOrder, outputOrder, { blockInvalid: balance !== undefined });
     const descriptionValue = normalizeDescription(row.cells[description], journal, line);
     const existingIssues = journal.issues.length;
     const amounts = convertAmounts(row, amount, split, journal, currencyCode);
-    if (journal.bookkeeperAmounts) {
+    if (journal.bookkeeperAmounts || balance !== undefined) {
       const [payment, deposit] = amounts;
       const value = split ? payment ? `-${payment}` : deposit : payment;
       const valid = value && !journal.issues.slice(existingIssues).some(({ autoFixed }) => !autoFixed);
-      journal.bookkeeperAmounts.push({ row: line, currency: currencyCode ?? null, amounts: valid ? { amount: value } : {} });
+      journal.bookkeeperAmounts?.push({ row: line, currency: currencyCode ?? null, amounts: valid ? { amount: value } : {} });
+      if (balance !== undefined) {
+        const amountColumn = 'signed' in amount ? amount.signed.name : value.startsWith('-') ? amount.spent.name : amount.received.name;
+        movements.set(row, { date: dateValue.iso, amount: valid ? value : undefined, amountColumn });
+      }
     }
     row.after = [
-      dateValue, descriptionValue, ...amounts,
+      dateValue.value, descriptionValue, ...amounts,
     ];
   }
+  auditBankBalance(table, journal, movements, 'Date', currencyCodes);
   return { headers, dateOrder: outputOrder };
 }

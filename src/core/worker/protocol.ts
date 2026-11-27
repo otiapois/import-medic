@@ -12,7 +12,7 @@ export interface WorkerProgress {
 }
 export interface PlatformSuggestion {
   platform: PlatformId;
-  provider: 'Shopify' | 'QuickBooks' | 'Stripe' | 'PayPal' | 'Stripe / PayPal';
+  provider: 'Shopify' | 'QuickBooks' | 'Stripe' | 'PayPal' | 'Stripe / PayPal' | 'Xero' | 'FreshBooks';
 }
 export interface GuardSummary {
   enabled: boolean;
@@ -46,7 +46,7 @@ export interface DiffSummary extends Pick<PriceDiffResult, 'status' | 'canDownlo
 export type RepairIssueFilter = 'all' | 'review' | 'fixed';
 export interface RowMarks { changed: string[]; review: string[] }
 export interface RepairPreviewRow extends PreviewRow { beforeMarks: RowMarks; afterMarks: RowMarks }
-export interface RepairSummary extends Omit<RepairResult, 'rows' | 'issues' | 'changes' | 'removedRows' | 'repairedCsv' | 'formulaGuard' | 'bookkeeperAmounts'> {
+export interface RepairSummary extends Omit<RepairResult, 'rows' | 'issues' | 'changes' | 'removedRows' | 'repairedCsv' | 'formulaGuard' | 'bookkeeperAmounts' | 'freshBooksTaxes'> {
   custody: RepairCustody;
   rowCount: number;
   removedRowCount: number;

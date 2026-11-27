@@ -1,0 +1,3 @@
+Date,Merchant,Category,Description,Amount,Tax 1 Name,Tax 1 Amount,Currency
+2026-05-01,Example Office,Office Expenses,"Supplies, labels and paper","($45.20)",Sales Tax,$2.20, usd
+2026-05-03,Example Cafe,Meals,Crew meeting,-15.60,Sales Tax,1.60,USD

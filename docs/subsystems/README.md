@@ -4,8 +4,8 @@ Read the owning subsystem contract before changing code, and update it in the sa
 
 | Subsystem | Scope | Contract |
 | --- | --- | --- |
-| Core CSV Repair Engine | Raw byte decoding (BOM/Windows-1252/UTF-8), PapaParse wrapper, rule runner, cell-level diff ledger, fail-closed review queue, audited spreadsheet formula guard, deterministic CSV export and roundtrip check, file fingerprints, offline bookkeeper sign-off | [csv-engine.md](csv-engine.md) |
-| Platform Profiles | Official import rules, real error diagnostics, safe auto-fixes, and fail-closed boundaries for Shopify Products, QuickBooks Online Bank (3-col & 4-col), and Stripe/PayPal | [platform-rules.md](platform-rules.md) |
+| Core CSV Repair Engine | Byte decoding, Papa Parse, cell-level diffs, fail-closed review, formula guard, CSV roundtrip, running-balance checks, file fingerprints, and offline bookkeeper sign-off | [csv-engine.md](csv-engine.md) |
+| Platform Profiles | Import rules, diagnostics, auto-fixes, and review conditions for Shopify Products, QuickBooks Online Bank, Stripe/PayPal, Xero Bank, and FreshBooks Expenses | [platform-rules.md](platform-rules.md) |
 | Shopify Price Diff and shared pricing | Baseline and supplier parsing, variant joins and supplier conflict provenance, base and Markets pricing, optional base inventory, portable recipes, price and margin analytics, paired native CSV replay, file fingerprints, audits, and offline sign-off | [shopify-price-diff.md](shopify-price-diff.md) |
 | WooCommerce Price Diff | Exact SKU matching, existing product and variation identity, optional sale price and tracked stock, and scoped native CSV replay | [woocommerce-price-diff.md](woocommerce-price-diff.md) |
 | BigCommerce Price and Stock Diff | Legacy Bulk Edit format, exact product and SKU identity, standalone product price and sale price, eligible tracked stock, and scoped native CSV replay | [bigcommerce-price-diff.md](bigcommerce-price-diff.md) |
@@ -23,3 +23,4 @@ Read the owning subsystem contract before changing code, and update it in the sa
 5. Recompute SHA-256 from the original files and actual CSV downloads. Compare the values with the workbench, JSON audit, and offline sign-off. Check that a held export has no output checksum.
 6. Inspect the actual native update and rollback against their original baseline. Confirm that the inspector rejects a forbidden column and a changed SKU. Check scope agreement with the baseline alone and full catalog recovery with the matched update available.
 7. Export the committed public source to a new directory, check that it excludes `docs/research`, and run `tsc --noEmit` using the exported project configuration and the locked release dependencies.
+8. Replay a valid and broken running-balance file. Match the verified link counts, physical lines, balances, and held status across screen, JSON audit, and offline Bookkeeper Sign-Off. Check that a FreshBooks mixed-currency file holds and a single-currency expense file passes local byte validation.

@@ -64,7 +64,9 @@ export function repairAudit(result: RepairResult, options: RepairOptions, custod
     retainedRowCount: result.rows.length, canDownload: result.canDownload,
     needsManualReviewCount: result.needsManualReviewCount, roundtripCheck: result.roundtripCheck,
     formulaGuard: result.formulaGuard, issues: result.issues, changes: result.changes, removedRows: result.removedRows,
-    custody, currencySplit: result.currencySplit, stripePayPalFeeConvention: result.stripePayPalFeeConvention,
+    custody: custody && (result.canDownload ? custody : { sourceSha256: custody.sourceSha256 }),
+    currencySplit: result.currencySplit, stripePayPalFeeConvention: result.stripePayPalFeeConvention,
+    balanceChain: result.balanceChain, freshBooksTaxes: result.freshBooksTaxes,
   };
 }
 
@@ -81,6 +83,8 @@ export function repairAuditText(report: ReturnType<typeof repairAudit>): string 
     `CSV export available: ${report.canDownload ? 'Yes' : 'No'}`,
     `Needs manual review: ${report.needsManualReviewCount}`,
     `Roundtrip validation: ${report.roundtripCheck.checked ? JSON.stringify(report.roundtripCheck) : 'Unavailable'}`,
+    ...(report.balanceChain ? [`Running-balance chain: ${JSON.stringify(report.balanceChain)}`] : []),
+    ...(report.freshBooksTaxes ? [`FreshBooks tax review: ${JSON.stringify(report.freshBooksTaxes)}`] : []),
     '',
     `ISSUES (${report.issues.length})`,
     ...report.issues.map((issue) =>

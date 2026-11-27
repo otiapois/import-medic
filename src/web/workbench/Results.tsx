@@ -2,6 +2,7 @@ import { lazy, Suspense, useCallback, useId, useRef, useState } from 'react';
 import type { WorkbenchWorker } from '../../core/worker/client';
 import type { RepairSummary } from '../../core/worker/protocol';
 import type { RepairIssue } from '../../core/types';
+import { BalanceAudit } from './BalanceAudit';
 import { ExportActions, Inquiry } from './downloads';
 import type { RepairDownload } from './downloads';
 import { PAGE_SIZE, Pagination, pagination, usePagination } from './Pagination';
@@ -71,6 +72,7 @@ export function Results({ result, worker, current, busy, guardEnabled, onEdit, o
             <div><dt>Removed rows</dt><dd>{result.removedRowCount.toLocaleString('en-US')}</dd></div>
           </dl>
         ) : null}
+        {current && (result.balanceChain || result.platform === 'xero-bank') ? <BalanceAudit chain={result.balanceChain} /> : null}
         <TabBar id={id} label="Repair results views" items={RESULT_TABS} active={tab} onChange={setTab} className="result-tabs" />
         {RESULT_TABS.map((item) => (
           <div key={item.id} role="tabpanel" id={`${id}-${item.id}-panel`} aria-labelledby={`${id}-${item.id}-tab`} tabIndex={0} className="result-panel" hidden={tab !== item.id}>
@@ -88,7 +90,7 @@ export function Results({ result, worker, current, busy, guardEnabled, onEdit, o
                   </label>
                 </div>
                 <p className="sr-only" role="status">{saveMessage}</p>
-                {current && result.currencySplit?.length ? <CurrencySplit groups={result.currencySplit} /> : null}
+                {current && result.currencySplit?.length ? <CurrencySplit groups={result.currencySplit} platform={result.platform} /> : null}
                 <ReviewList key={filter} worker={worker} result={result} current={current} filter={filter} onEdit={saveEdit} />
               </>
             ) : null}
@@ -107,13 +109,17 @@ export function Results({ result, worker, current, busy, guardEnabled, onEdit, o
   );
 }
 
-function CurrencySplit({ groups }: { groups: NonNullable<RepairSummary['currencySplit']> }) {
+function CurrencySplit({ groups, platform }: {
+  groups: NonNullable<RepairSummary['currencySplit']>;
+  platform: RepairSummary['platform'];
+}) {
   const id = useId();
   const page = usePagination(groups.length);
+  const destination = platform === 'freshbooks-expenses' ? 'FreshBooks' : platform === 'xero-bank' ? 'Xero' : 'QuickBooks';
   return (
     <section className="currency-split" aria-label="Currency split">
-      <h4>Mixed currencies block QuickBooks export</h4>
-      <p>Use a separate bank CSV for each currency.</p>
+      <h4>Mixed currencies block {destination} export</h4>
+      <p>{platform === 'freshbooks-expenses' ? 'Use a separate CSV for each currency and confirm it matches the account currency.' : 'Use a separate bank CSV for each currency.'}</p>
       <ul>
         {groups.slice(page.start, page.end).map(({ currency, lines }) => (
           <li key={currency} data-currency={currency}>

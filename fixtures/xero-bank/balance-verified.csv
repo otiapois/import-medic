@@ -1,0 +1,5 @@
+Transaction Date,Transaction Amount,Payee,Description,Reference,Cheque Number,Running Balance,Currency
+2026-05-01,100.00,Opening payee,"First deposit
+confirmed on the statement",00017,00091,200.00,USD
+2026-05-02,(45.20),=SAFE_REVIEW(),Supplies,00018,00092,154.80,USD
+2026-05-03,42.50,Sample payer,Final deposit,00019,00093,197.30,USD

@@ -35,7 +35,8 @@ export interface Table {
 export function findSourceColumn(sourceHeaders: readonly string[], column: string, aliases: HeaderAliases): number {
   const exact = sourceHeaders.indexOf(column);
   if (exact !== -1) return exact;
-  return sourceHeaders.findIndex((header) => canonicalHeader(header, aliases) === column);
+  const canonical = canonicalHeader(column, aliases);
+  return sourceHeaders.findIndex((header) => canonicalHeader(header, aliases) === canonical);
 }
 
 const smartPunctuation: Record<string, string> = {
@@ -50,10 +51,11 @@ export function readTable(
   aliases: HeaderAliases,
   journal: Journal,
   edits: readonly ManualCellEdit[],
-  { fixWindowsPunctuation, paddingColumns }: { fixWindowsPunctuation: boolean; paddingColumns?: ReadonlySet<string> },
+  { fixWindowsPunctuation, paddingColumns, keepDelimitedEmptyRows = false }:
+  { fixWindowsPunctuation: boolean; paddingColumns?: ReadonlySet<string>; keepDelimitedEmptyRows?: boolean },
 ): Table {
   const records = input.filter((record) => {
-    if (!hasNoCells(record)) return true;
+    if (!hasNoCells(record) || (keepDelimitedEmptyRows && record.raw.trim() !== '')) return true;
     journal.remove('blank-row', record, 'Removed an empty CSV record.');
     return false;
   });

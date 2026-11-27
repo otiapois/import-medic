@@ -1,6 +1,6 @@
 import type { FormulaGuardAudit } from './formula-guard';
 
-export const PLATFORM_IDS = ['shopify-products', 'quickbooks-bank', 'stripe-paypal'] as const;
+export const PLATFORM_IDS = ['shopify-products', 'quickbooks-bank', 'stripe-paypal', 'xero-bank', 'freshbooks-expenses'] as const;
 
 export type PlatformId = (typeof PLATFORM_IDS)[number];
 export type DateOrder = 'auto' | 'MDY' | 'DMY';
@@ -76,6 +76,32 @@ export interface BookkeeperAmountRow {
   amounts: Partial<Record<'amount' | 'gross' | 'fee' | 'net', string>>;
 }
 
+export interface BalanceChainBreak {
+  row: number;
+  expected: string;
+  actual: string;
+  delta: string;
+}
+
+export interface BalanceChain {
+  status: 'VERIFIED' | 'FAIL_BALANCE_BREAK' | 'UNVERIFIABLE';
+  direction: 'ascending' | 'descending' | null;
+  currency: string | null;
+  openingBalance: string | null;
+  netMovement: string | null;
+  closingBalance: string | null;
+  verifiedLinks: number;
+  totalLinks: number;
+  breaks: readonly BalanceChainBreak[];
+  reasons: readonly { row: number; column: string; message: string }[];
+}
+
+export interface FreshBooksTaxRow {
+  row: number;
+  name: string;
+  amount: string;
+}
+
 export interface RepairResult {
   filename: string;
   platform: PlatformId;
@@ -93,6 +119,8 @@ export interface RepairResult {
   roundtripCheck: RoundtripCheck;
   formulaGuard: FormulaGuardAudit;
   bookkeeperAmounts: readonly BookkeeperAmountRow[];
+  balanceChain?: BalanceChain;
+  freshBooksTaxes?: readonly FreshBooksTaxRow[];
   currencySplit?: readonly { currency: string; lines: readonly number[] }[];
   stripePayPalFeeConvention?: FeeConvention;
 }

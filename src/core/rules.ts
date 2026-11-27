@@ -50,6 +50,10 @@ const RULE_SLUGS = {
   'paypal-memo-in-export': 'paypal-balance-impact-csv',
   'invalid-balance-impact': 'paypal-balance-impact-csv',
   'balance-impact-conflict': 'paypal-balance-impact-csv',
+  'balance-chain-break': 'quickbooks-3-column-vs-4-column',
+  'balance-chain-unverifiable': 'quickbooks-3-column-vs-4-column',
+  'freshbooks-mixed-sign': 'quickbooks-csv-negative-parentheses',
+  'freshbooks-amount-scale': 'quickbooks-csv-negative-parentheses',
 } as const;
 
 export type RuleId = keyof typeof RULE_SLUGS;
@@ -58,7 +62,8 @@ export const ruleDocSlug = (code: RuleId, platform: string): string => {
   const slug = RULE_SLUGS[code];
   const platformSlug = platform === 'stripe-paypal' && (slug.startsWith('quickbooks-') || slug.startsWith('shopify-'))
     ? 'stripe-payout-csv-to-quickbooks'
-    : platform === 'quickbooks-bank' && (slug.startsWith('shopify-') || slug === 'stripe-payout-csv-to-quickbooks')
+    : (platform === 'quickbooks-bank' || platform === 'xero-bank' || platform === 'freshbooks-expenses') &&
+      (slug.startsWith('shopify-') || slug === 'stripe-payout-csv-to-quickbooks')
       ? 'quickbooks-3-column-vs-4-column'
       : slug;
   return `/fix/${platformSlug}`;

@@ -6,27 +6,30 @@ import type { DateOrder } from './types';
 const decimalSchema = z.string().regex(/^(?:\d+(?:\.\d+)?|\.\d+)$/);
 const groupedDecimalSchema = z.string().regex(/^\d{1,3}(?:,\d{3})+(?:\.\d+)?$/);
 const currencySchema = z.string().regex(/^[A-Z]{3}$/);
+const isoCurrencies = new Set(Intl.supportedValuesOf('currency'));
 
-function splitAmount(source: string) {
+function splitAmount(source: string, allowTrailingMinus = false) {
   let value = source.trim();
   const parenthesized = value.startsWith('(') && value.endsWith(')');
   if (parenthesized) value = value.slice(1, -1).trim();
-  // Accept either -$10.25 or $-10.25, with at most one explicit sign and symbol.
+  const trailingMinus = allowTrailingMinus && value.endsWith('-');
+  if (trailingMinus) value = value.slice(0, -1).trimEnd();
+  // Accept either -$10.25 or $-10.25, with at most one sign and symbol.
   const parts = /^([+-]?)([$€£¥]?)([+-]?)([^+\-()$€£¥]+)$/.exec(value);
   if (!parts) return undefined;
   const [, prefixSign, currency, suffixSign, magnitude] = parts;
-  if ((prefixSign && suffixSign) || (parenthesized && (prefixSign || suffixSign))) return undefined;
+  if (Number(Boolean(prefixSign)) + Number(Boolean(suffixSign)) + Number(parenthesized) + Number(trailingMinus) > 1) return undefined;
   return {
-    negative: parenthesized || prefixSign === '-' || suffixSign === '-',
+    negative: parenthesized || trailingMinus || prefixSign === '-' || suffixSign === '-',
     currency,
     digits: magnitude.trim(),
   };
 }
 
-export const amountCurrencySymbol = (source: string): string => splitAmount(source)?.currency ?? '';
+export const amountCurrencySymbol = (source: string, allowTrailingMinus = false): string => splitAmount(source, allowTrailingMinus)?.currency ?? '';
 
-export function normalizeAmount(source: string, currencyCode?: string): string | undefined {
-  const amount = splitAmount(source);
+export function normalizeAmount(source: string, currencyCode?: string, allowTrailingMinus = false): string | undefined {
+  const amount = splitAmount(source, allowTrailingMinus);
   if (!amount) return undefined;
   const { negative, currency, digits } = amount;
   if (currency && currencyCode) {
@@ -53,7 +56,12 @@ export function normalizeAmount(source: string, currencyCode?: string): string |
 
 export const isZeroAmount = (value: string): boolean => /^-?0(?:\.0+)?$/.test(value);
 
-export function reviewCurrencies(rows: readonly WorkingRow[], index: number, journal: Journal, singleCurrency: boolean): ReadonlyMap<WorkingRow, string> {
+export const currencyFractionDigits = (currency: string): number =>
+  new Intl.NumberFormat('en-US', { style: 'currency', currency }).resolvedOptions().maximumFractionDigits!;
+
+export function reviewCurrencies(
+  rows: readonly WorkingRow[], index: number, journal: Journal, singleCurrency: boolean, requireIsoCurrency = false,
+): ReadonlyMap<WorkingRow, string> {
   const codes = new Map<WorkingRow, string>();
   const linesByCurrency = new Map<string, number[]>();
   let reference: string | undefined;
@@ -61,8 +69,10 @@ export function reviewCurrencies(rows: readonly WorkingRow[], index: number, jou
     const raw = row.cells[index];
     const code = raw.trim().toUpperCase();
     const line = row.source.line;
-    if (!currencySchema.safeParse(code).success) {
-      journal.issue('invalid-currency', line, 'Currency', raw, 'Enter the original three-letter currency code.', { editable: true, block: singleCurrency });
+    if (!currencySchema.safeParse(code).success || (requireIsoCurrency && !isoCurrencies.has(code))) {
+      journal.issue('invalid-currency', line, 'Currency', raw,
+        requireIsoCurrency ? 'Enter a supported ISO currency code from the original transaction.' : 'Enter the original three-letter currency code.',
+        { editable: true, block: singleCurrency });
       continue;
     }
     codes.set(row, journal.fix('currency-normalized', line, 'Currency', raw, code, 'Standardized the currency code to uppercase.'));
@@ -80,20 +90,38 @@ export function reviewCurrencies(rows: readonly WorkingRow[], index: number, jou
   return codes;
 }
 
+export function reviewAmountSymbols(
+  rows: readonly WorkingRow[], columns: readonly { index: number; name: string }[], journal: Journal, allowTrailingMinus = false,
+): void {
+  let reference: string | undefined;
+  for (const row of rows) {
+    for (const { index, name } of columns) {
+      const raw = row.cells[index];
+      const symbol = amountCurrencySymbol(raw, allowTrailingMinus);
+      if (!symbol) continue;
+      reference ??= symbol;
+      if (symbol !== reference) {
+        journal.issue('multi-currency', row.source.line, name, raw, `Found ${symbol} alongside ${reference} in the bank values. Use a source file for one account currency.`, { block: true });
+      }
+    }
+  }
+}
+
 export function repairAmount(
   raw: string,
   row: number,
   column: string,
   journal: Journal,
-  { unsigned = false, required = true, blockInvalid = false, nonzero = false, currencyCode }:
-  { unsigned?: boolean; required?: boolean; blockInvalid?: boolean; nonzero?: boolean; currencyCode?: string } = {},
+  { unsigned = false, required = true, blockInvalid = false, nonzero = false, currencyCode, allowTrailingMinus = false, layoutName = 'QuickBooks bank CSV' }:
+  { unsigned?: boolean; required?: boolean; blockInvalid?: boolean; nonzero?: boolean; currencyCode?: string;
+    allowTrailingMinus?: boolean; layoutName?: string } = {},
 ): { value: string; valid: boolean; validatedDecimal?: string } {
   if (!raw.trim()) {
     if (required) journal.issue('missing-amount', row, column, raw, 'Enter the original transaction amount.', { editable: true, block: blockInvalid });
     const value = required ? raw : journal.fix('amount-normalized', row, column, raw, '', 'Cleared whitespace in the unused amount cell.');
     return { value, valid: !required };
   }
-  const value = normalizeAmount(raw, currencyCode);
+  const value = normalizeAmount(raw, currencyCode, allowTrailingMinus);
   if (value === undefined || (unsigned && value.startsWith('-'))) {
     const message = unsigned
       ? 'Enter an unsigned amount in the appropriate payment or deposit column.'
@@ -102,7 +130,7 @@ export function repairAmount(
     return { value: raw, valid: false };
   }
   if (nonzero && isZeroAmount(value)) {
-    journal.issue('invalid-amount', row, column, raw, 'QuickBooks bank CSV requires a nonzero transaction amount. Verify the amount against the source transaction.', { editable: true, block: true });
+    journal.issue('invalid-amount', row, column, raw, `${layoutName} requires a nonzero transaction amount. Verify the amount against the source transaction.`, { editable: true, block: true });
     return { value: raw, valid: false, validatedDecimal: value };
   }
   return { value: journal.fix('amount-normalized', row, column, raw, value, 'Removed currency formatting without changing the transaction amount.'), valid: true };
@@ -113,6 +141,7 @@ type CalendarDate = { year: number; month: number; day: number };
 
 const months = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
 const iso = /^(\d{4})-(\d{2})-(\d{2})$/;
+const yearFirstSlash = /^(\d{4})\/(\d{2})\/(\d{2})$/;
 const timestamp = /^(\d{4})-(\d{2})-(\d{2})[T ](?:[01]\d|2[0-3]):[0-5]\d:[0-5]\d(?:\.\d+)?(?:Z|[+-](?:[01]\d|2[0-3]):[0-5]\d)?$/;
 const named = /^(\d{1,2})-([a-z]{3})-(\d{4})$/i;
 const slashed = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/;
@@ -145,22 +174,25 @@ export function inferDateOrder(values: Iterable<string>, choice: DateOrder = 'au
   return known.size === 1 ? known.values().next().value : undefined;
 }
 
-export function normalizeDate(
+type OutputDateOrder = ChosenDateOrder | 'ISO' | 'YMD';
+type DateRepairOptions = { allowTimestamp?: boolean; blockInvalid?: boolean };
+
+export function repairDate(
   source: string,
   journal: Journal,
   location: { row: number; column: string },
   inputOrder: ChosenDateOrder | undefined,
-  outputOrder: ChosenDateOrder | 'ISO',
-  { allowTimestamp = false, blockInvalid = false }: { allowTimestamp?: boolean; blockInvalid?: boolean } = {},
-): string {
+  outputOrder: OutputDateOrder,
+  { allowTimestamp = false, blockInvalid = false }: DateRepairOptions = {},
+): { value: string; iso?: string } {
   const { row, column } = location;
   const value = source.trim();
   if (value === '') {
     journal.issue('missing-date', row, column, source, 'Enter the date from the source transaction.', { editable: true, block: blockInvalid });
-    return source;
+    return { value: source };
   }
 
-  const isoParts = (allowTimestamp ? timestamp.exec(value) : null) ?? iso.exec(value);
+  const isoParts = (allowTimestamp ? timestamp.exec(value) : null) ?? iso.exec(value) ?? yearFirstSlash.exec(value);
   const namedParts = named.exec(value);
   let date: CalendarDate | undefined;
   if (isoParts) {
@@ -171,21 +203,30 @@ export function normalizeDate(
     const { MDY, DMY } = slashDate(value);
     if (!inputOrder && MDY && DMY && MDY.day !== DMY.day) {
       journal.issue('date-order-ambiguous', row, column, source, 'Choose the date order or enter this date as YYYY-MM-DD.', { editable: true, block: true });
-      return source;
+      return { value: source };
     }
     date = inputOrder ? { MDY, DMY }[inputOrder] : MDY ?? DMY;
   }
 
   if (!date) {
     journal.issue('invalid-date', row, column, source, 'Enter a real calendar date using YYYY-MM-DD or the selected date order.', { editable: true, block: blockInvalid });
-    return source;
+    return { value: source };
   }
 
   const year = String(date.year).padStart(4, '0');
   const month = String(date.month).padStart(2, '0');
   const day = String(date.day).padStart(2, '0');
-  const formatted = outputOrder === 'ISO' ? `${year}-${month}-${day}` : outputOrder === 'DMY' ? `${day}/${month}/${year}` : `${month}/${day}/${year}`;
-  return journal.fix('date-normalized', row, column, source, formatted, 'Standardized the date without shifting its calendar day.');
+  const isoValue = `${year}-${month}-${day}`;
+  const formatted = outputOrder === 'ISO' ? isoValue : outputOrder === 'YMD' ? `${year}/${month}/${day}` :
+    outputOrder === 'DMY' ? `${day}/${month}/${year}` : `${month}/${day}/${year}`;
+  return { value: journal.fix('date-normalized', row, column, source, formatted, 'Standardized the date without shifting its calendar day.'), iso: isoValue };
+}
+
+export function normalizeDate(
+  source: string, journal: Journal, location: { row: number; column: string }, inputOrder: ChosenDateOrder | undefined,
+  outputOrder: OutputDateOrder, options?: DateRepairOptions,
+): string {
+  return repairDate(source, journal, location, inputOrder, outputOrder, options).value;
 }
 
 export function normalizeDescription(source: string, journal: Journal, row: number): string {
