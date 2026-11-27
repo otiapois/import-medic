@@ -1,0 +1,6 @@
+Date,Name,Gross,Fee,Net,Currency,Transaction ID,Balance Impact
+2026-11-24,"Desk
+supplies",40.00,-2.32,37.68,USD,P-1,Credit
+2026-11-25,Memo,777.00,0.00,777.00,EUR,P-2,Memo
+2026-11-26,Refund,-40.00,2.32,-37.68,GBP,P-3,Debit
+2026-11-27,Reverse dispute,40.00,12.91,52.91,USD,P-4,Credit

@@ -1,0 +1,7 @@
+Item Type,Product ID,Product Name,Product Code/SKU,Price,Sale Price,Current Stock Level,Track Inventory,Product Description,Category,Product Image File - 1,Meta Keywords
+Product,101,"Mug & Travel Case, 250mL",00123,020.000,15.90,010,by product,"<p>Original description</p>",Kitchen,travel.jpg,branded
+Product,0202,Travel mug colors,00200,25.00,,,by option,Original colors,Kitchen,colors.jpg,color
+SKU,00203,[RB]Color=Red,00201,25.00,,004,,,,,
+SKU,00204,[RB]Color=Blue,00202,,,005,,,,,
+Rule,390,,00202,[FIXED]26.00,,,,,,,
+Product,303,Separate catalog row,00301,99.99,,,none,Keep this whole row,Other,separate.jpg,extra

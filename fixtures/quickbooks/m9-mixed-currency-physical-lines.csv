@@ -1,0 +1,10 @@
+Account Number,SYNTHETIC-M9
+Date,Description,Amount,Currency
+2026-11-24,"Desk
+supplies",8.20," usd "
+2026-11-25,EUR expense,-1.01,EUR
+2026-11-25,SAR deposit,2.32,SAR
+2026-11-25,AED reversal,-2.91,AED
+2026-11-25,GBP deposit,11.04,GBP
+2026-11-25,USD again,10.90,USD
+Ending Balance,28.54

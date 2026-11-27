@@ -1,0 +1,19 @@
+# WooCommerce supplier price and stock diff
+
+The workbench compares a WooCommerce Products CSV with one to three supplier CSV or XLSX files using the shared supplier parsing, pricing, and review engine. The join uses exact SKU text, including leading zeros such as `00123`. Duplicate SKUs and scientific-notation SKU cells require review. Use a fresh product export from the destination store. [Shared pricing and supplier comparison](shopify-price-diff.md)
+
+## Native pair
+
+The update and rollback include changed simple products and variations only. Both carry `ID`, `Type`, `SKU`, `Parent`, and `Regular price`, plus `Sale price` and `Stock` when enabled. Existing variation rows retain their original IDs and parent references. WooCommerce supports parent references by SKU or `id:123`. Parent rows and unchanged siblings stay in the baseline matrix for replay, and the pair omits content fields such as `Name`, descriptions, categories, tags, attributes, images, and `Meta:*`. [WooCommerce product CSV schema](https://woocommerce.com/document/product-csv-importer-exporter/#product-csv-import-schema)
+
+Map a supplier column to update sale prices. A sale price must remain below regular price for the update and rollback. WooCommerce can clear an existing sale price when a new regular price is at or below it, even if the sale column was omitted. The comparison checks retained as well as mapped sale prices and requires an original `Sale price` column when a regular price falls. [WooCommerce product data store](https://github.com/woocommerce/woocommerce/blob/trunk/plugins/woocommerce/includes/data-stores/class-wc-product-data-store-cpt.php#L867-L874)
+
+Stock changes apply to explicitly tracked numeric stock using safe whole-number quantities. A blank `Stock` cell disables tracking and `parent` inherits it. An included stock field can change tracking even when the regular price is the only intended edit. When `Stock` is included, every exported row must have a numeric tracked original quantity. The pair is held for blank or inherited originals. [WooCommerce stock parsing](https://github.com/woocommerce/woocommerce/blob/trunk/plugins/woocommerce/includes/import/class-wc-product-csv-importer.php#L1269)
+
+## Local verification and import
+
+The engine encodes and re-parses the actual CSV update and rollback, applies the scoped changes to the uploaded matrix, and checks that the rollback restores every original cell. CSV and JSON audits and the offline Client Sign-Off HTML retain the review evidence. The workbench and sign-off summarize comparable regular-price movement, landed-cost margins when available, and changes to mapped stock. The replay verifies the files against that snapshot. The workbench, JSON audit, and sign-off also carry SHA-256 fingerprints for the original baseline, supplier files, and verified native pair when available. [Shared audit and fingerprint contract](shopify-price-diff.md#native-csv-pair-and-audit) · [Catalog impact and margin](shopify-price-diff.md#catalog-impact-and-margin)
+
+The standalone **Verify Update / Rollback CSV** mode checks a candidate against the original WooCommerce export. It checks allowed headers, exact IDs and SKUs, and variation parent references using the original catalog. The inspector reports exact regular price and any included sale price and stock differences. [Standalone inspector contract](shopify-price-diff.md#verify-before-import)
+
+Use WooCommerce's built-in **Update existing products** importer on the same store. Check the current IDs, SKUs, parent references, prices, and any included stock, then review the importer column mapping before running it. Compare current values against the matched update before a rollback to account for later edits or stock movement. [WooCommerce update instructions](https://woocommerce.com/document/product-csv-importer-exporter/#update-existing-products)

@@ -1,0 +1,3 @@
+ID,Type,SKU,Name,Parent,Regular price,Sale price,Stock,Description
+4100,variable,00040,Synthetic Parent,,,,,Preserve
+4101,variation,00123,Synthetic Variation,00040,50.50,40.00,parent,Preserve

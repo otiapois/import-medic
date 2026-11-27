@@ -1,0 +1,5 @@
+Item Type,Product ID,Product Name,Product Code/SKU,Price,Sale Price,Current Stock Level
+Product,101,"Mug & Travel Case, 250mL",00123,020.000,15.90,010
+Product,0202,Travel mug colors,00200,,,
+SKU,00203,[RB]Color=Red,00201,,,004
+SKU,00204,[RB]Color=Blue,00202,,,

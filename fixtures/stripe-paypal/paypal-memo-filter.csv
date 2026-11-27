@@ -1,0 +1,4 @@
+Date,Time,Time Zone,Name,Type,Status,Currency,Gross,Fee,Net,Transaction ID,Balance,Balance Impact
+11/24/2026,10:04:12,PST,Workshop Shop,Express Checkout Payment,Completed,USD,85.00,-2.77,82.23,DEMO-PP-001,126.31,Credit
+11/24/2026,10:10:18,PST,Workshop Shop,Authorization,Pending,USD,14.00,0.00,14.00,DEMO-PP-002,126.31,Memo
+11/25/2026,11:02:59,PST,Workshop Shop,Payment Refund,Completed,USD,-15.00,0.00,-15.00,DEMO-PP-003,111.31,Debit

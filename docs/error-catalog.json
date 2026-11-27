@@ -1,0 +1,651 @@
+{
+  "schemaVersion": 1,
+  "errors": [
+    {
+      "code": "encoding-repaired",
+      "platform": "shopify-products",
+      "title": "Fix invalid UTF-8 in a Shopify product CSV",
+      "symptom": "A product import reports illegal quoting, or text such as café appears as garbled characters.",
+      "trigger": "The file bytes were saved in a different encoding, or the opening bytes include a byte-order mark. Stray CSV quotes can produce a similar error.",
+      "slug": "shopify-csv-invalid-utf8",
+      "before": "Windows-1252: Café cup – chef’s choice",
+      "after": "UTF-8: Café cup - chef's choice",
+      "fixMode": "conditional",
+      "fixtures": [
+        "fixtures/shopify/utf8-bom.csv",
+        "fixtures/shopify/windows-1252-smart-punctuation.csv",
+        "fixtures/shopify/utf16le-supplier-export.csv",
+        "fixtures/shopify/mixed-line-endings-multiline.csv"
+      ],
+      "faq": [
+        {
+          "question": "Does an illegal quoting error always mean the encoding is wrong?",
+          "answer": "It can indicate a stray or unclosed field quote. Export as UTF-8, then check the reported record for straight double quotes around comma-containing fields and doubled quotes inside them."
+        },
+        {
+          "question": "Can UTF-8 conversion restore text that is already garbled?",
+          "answer": "If the original bytes are intact, re-decoding can recover the original characters. If replacement characters have already been saved into the file, restore the text from the original export."
+        }
+      ],
+      "sources": [
+        {
+          "title": "Shopify Help Center — Product CSV format and required columns",
+          "url": "https://help.shopify.com/en/manual/products/import-export/using-csv",
+          "kind": "official"
+        },
+        {
+          "title": "Shopify Help Center — Importing products with a CSV file",
+          "url": "https://help.shopify.com/en/manual/products/import-export/import-products",
+          "kind": "official"
+        },
+        {
+          "title": "Shopify Community — Product CSV fails with illegal quoting after variant edits",
+          "url": "https://community.shopify.com/t/error-al-importar-productos-csv-illegal-quoting/241485",
+          "kind": "community"
+        }
+      ]
+    },
+    {
+      "code": "missing-header",
+      "platform": "shopify-products",
+      "title": "Fix missing Shopify product CSV headers",
+      "symptom": "Shopify reports a missing header such as Title, or the file is interpreted using the wrong columns.",
+      "trigger": "The first record lacks a required heading or uses a supplier-specific label. Case, whitespace and the wrong delimiter can also prevent a match.",
+      "slug": "shopify-csv-missing-headers",
+      "before": "Handle,Listing Name,Variant SKU,Variant Price",
+      "after": "Handle,Title,Variant SKU,Variant Price",
+      "fixMode": "conditional",
+      "fixtures": [
+        "fixtures/shopify/missing-title-header.csv",
+        "fixtures/shopify/modern-shopify-headers.csv"
+      ],
+      "faq": [
+        {
+          "question": "Which Shopify columns are required?",
+          "answer": "Shopify documents Title as the only required header for new products without variants. Updates and variant imports also need URL handle. ImportMedic checks Handle and Title for its product and variant workflow."
+        },
+        {
+          "question": "Does Shopify still accept legacy headings like Handle and Variant Price?",
+          "answer": "Shopify documents compatibility with old headings. Current exports may use URL handle, Description, SKU, Price and Product image URL. When updating variants, retain the related option-name and option-value columns."
+        }
+      ],
+      "sources": [
+        {
+          "title": "Shopify Help Center — Product CSV format and required columns",
+          "url": "https://help.shopify.com/en/manual/products/import-export/using-csv",
+          "kind": "official"
+        },
+        {
+          "title": "Shopify Help Center — Importing products with a CSV file",
+          "url": "https://help.shopify.com/en/manual/products/import-export/import-products",
+          "kind": "official"
+        },
+        {
+          "title": "Shopify Community — Missing Title error despite a visible Title column",
+          "url": "https://community.shopify.com/t/how-to-fix-an-error-when-importing-products-from-excel/218606",
+          "kind": "community"
+        }
+      ]
+    },
+    {
+      "code": "invalid-price",
+      "platform": "shopify-products",
+      "title": "Repair Shopify variant prices and review duplicate SKUs",
+      "symptom": "The import flags a variant price, or two variants show the same SKU during review.",
+      "trigger": "Variant Price holds a decorated currency value, negative value or nonnumeric supplier text. A nonempty Variant SKU repeats on multiple records.",
+      "slug": "shopify-csv-variant-price-sku",
+      "before": "Variant Price \"$1,299.50\"; another row says \"call for price\"",
+      "after": "Variant Price 1299.50; confirm the intended price for the other row",
+      "fixMode": "conditional",
+      "fixtures": [
+        "fixtures/shopify/invalid-variant-price.csv",
+        "fixtures/shopify/negative-variant-price.csv",
+        "fixtures/shopify/legacy-compare-at-price.csv",
+        "fixtures/shopify/continuation-variants-and-image.csv",
+        "fixtures/shopify/duplicate-variant-skus.csv"
+      ],
+      "faq": [
+        {
+          "question": "Can ImportMedic fix a price such as $1,299.50?",
+          "answer": "It can remove currency formatting around an unambiguous number. Check the source catalog and supply the intended value when the file contains text like call for price or a negative price."
+        },
+        {
+          "question": "What happens to duplicate SKUs?",
+          "answer": "ImportMedic flags repeated SKUs for review and keeps both rows. Shopify warns that duplicates can affect inventory and integrations. Confirm whether the duplicate is intentional and follow your fulfillment requirements."
+        },
+        {
+          "question": "Why is the title blank on later variant rows?",
+          "answer": "Shopify expects later variant rows to reuse the product handle and leave the product title blank. Keep the price, SKU and option values that apply to each variant."
+        }
+      ],
+      "sources": [
+        {
+          "title": "Shopify Help Center — Product CSV format and required columns",
+          "url": "https://help.shopify.com/en/manual/products/import-export/using-csv",
+          "kind": "official"
+        },
+        {
+          "title": "Shopify Help Center — Troubleshooting product CSV imports",
+          "url": "https://help.shopify.com/en/manual/products/import-export/common-import-issues",
+          "kind": "official"
+        },
+        {
+          "title": "Shopify Help Center — Using SKUs to manage inventory",
+          "url": "https://help.shopify.com/en/manual/products/details/sku",
+          "kind": "official"
+        },
+        {
+          "title": "Shopify Community — Missing Title error despite a visible Title column",
+          "url": "https://community.shopify.com/t/how-to-fix-an-error-when-importing-products-from-excel/218606",
+          "kind": "community"
+        }
+      ]
+    },
+    {
+      "code": "date-order-ambiguous",
+      "platform": "quickbooks-bank",
+      "title": "Fix QuickBooks bank CSV date format errors",
+      "symptom": "QuickBooks rejects a date, or a date such as 03/04/2026 could be read as either March 4 or April 3.",
+      "trigger": "The date style differs from the import mapping, an entry is missing or invalid, or both orderings are possible and the file supplies no evidence for either.",
+      "slug": "quickbooks-csv-date-format-error",
+      "before": "03/04/2026,Studio rent,-400.00",
+      "after": "Choose MDY for March 4 or DMY for April 3, then match the QuickBooks date mapping.",
+      "fixMode": "conditional",
+      "fixtures": [
+        "fixtures/quickbooks/ambiguous-dates.csv",
+        "fixtures/quickbooks/date-order-inferred-mdy.csv",
+        "fixtures/quickbooks/date-order-selected-dmy.csv",
+        "fixtures/quickbooks/impossible-date.csv",
+        "fixtures/quickbooks/missing-amount-and-date.csv"
+      ],
+      "faq": [
+        {
+          "question": "Which date format should I select?",
+          "answer": "Confirm the date order from the bank export settings or a known transaction. Then select that same format when mapping dates in QuickBooks."
+        },
+        {
+          "question": "Can date order be inferred from another row?",
+          "answer": "A value such as 11/24/2026 can establish month-first order when the other numeric dates agree. If both orderings remain possible, ImportMedic asks you to decide."
+        },
+        {
+          "question": "What should I do with a date like February 30?",
+          "answer": "Check the actual transaction date on the bank statement and enter it in the review editor."
+        }
+      ],
+      "sources": [
+        {
+          "title": "Intuit — Format CSV bank transactions for QuickBooks (US)",
+          "url": "https://quickbooks.intuit.com/learn-support/en-us/help-article/bank-transactions/format-csv-files-excel-bank-transactions-quickbooks/L4BjLWckq_US_en_US",
+          "kind": "official"
+        },
+        {
+          "title": "Intuit — Common errors for importing bank transactions using CSV",
+          "url": "https://quickbooks.intuit.com/learn-support/en-global/help-article/import-transactions/common-errors-importing-bank-transactions-using/L02IgW462_ROW_en",
+          "kind": "official"
+        },
+        {
+          "title": "QuickBooks Community — Getting Date error when uploading a CSV file",
+          "url": "https://quickbooks.intuit.com/community/other-questions-55/getting-date-error-when-upload-csv-file-376719",
+          "kind": "community"
+        }
+      ]
+    },
+    {
+      "code": "amount-normalized",
+      "platform": "quickbooks-bank",
+      "title": "Convert QuickBooks CSV amounts in parentheses to negatives",
+      "symptom": "An Amount cell contains a currency symbol, a grouping comma or an accounting-style negative such as ($125.50).",
+      "trigger": "A bank or spreadsheet export formatted the numeric amount for display. Grouping commas remain part of the cell when it is correctly CSV-quoted.",
+      "slug": "quickbooks-csv-negative-parentheses",
+      "before": "2026-11-24,Warehouse rent,\"($1,240.50)\"",
+      "after": "11/24/2026,Warehouse rent,-1240.50",
+      "fixMode": "auto",
+      "fixtures": [
+        "fixtures/quickbooks/amount-parentheses.csv",
+        "fixtures/quickbooks/invalid-amount.csv",
+        "fixtures/quickbooks/ambiguous-currency-grouping.csv",
+        "fixtures/quickbooks/quoted-multiline-description.csv"
+      ],
+      "faq": [
+        {
+          "question": "What does ($125.50) mean in a bank CSV?",
+          "answer": "When parentheses wrap a valid accounting-style amount, the value is negative. With QuickBooks three-column bank CSVs, money out is represented by a leading minus."
+        },
+        {
+          "question": "Can an amount marked pending be fixed automatically?",
+          "answer": "Look up the posted amount in the bank statement. ImportMedic keeps unparseable amounts for manual review."
+        },
+        {
+          "question": "How should I handle a single comma in an amount?",
+          "answer": "Check the source number format before editing. A currency symbol alone does not tell the tool whether the comma separates thousands or decimals."
+        }
+      ],
+      "sources": [
+        {
+          "title": "Intuit — Common errors for importing bank transactions using CSV",
+          "url": "https://quickbooks.intuit.com/learn-support/en-global/help-article/import-transactions/common-errors-importing-bank-transactions-using/L02IgW462_ROW_en",
+          "kind": "official"
+        },
+        {
+          "title": "Intuit — Format CSV bank transactions for QuickBooks (US)",
+          "url": "https://quickbooks.intuit.com/learn-support/en-us/help-article/bank-transactions/format-csv-files-excel-bank-transactions-quickbooks/L4BjLWckq_US_en_US",
+          "kind": "official"
+        },
+        {
+          "title": "Intuit — QuickBooks Desktop training manual, negative amounts in parentheses",
+          "url": "https://quickbooks.intuit.com/cas/dam/content/dam/intuit/sbseg/en_us/priority-circle/content/QBD-Level1-Manual-2021.pdf",
+          "kind": "official"
+        }
+      ]
+    },
+    {
+      "code": "credit-debit-direction",
+      "platform": "quickbooks-bank",
+      "title": "Convert QuickBooks bank CSVs between three and four columns",
+      "symptom": "QuickBooks cannot map the bank export, amounts appear as the wrong direction, or one row contains both Credit and Debit.",
+      "trigger": "The bank uses its own headings or four-column sign convention, statement metadata is mixed with transactions, or both amount cells in the same record contain values.",
+      "slug": "quickbooks-3-column-vs-4-column",
+      "before": "Date,Description,Amount\n11/24/2026,Paper supplies,-23.75\n11/25/2026,Shop deposit,80.00",
+      "after": "Date,Description,Credit,Debit\n11/24/2026,Paper supplies,23.75,\n11/25/2026,Shop deposit,,80.00",
+      "fixMode": "conditional",
+      "fixtures": [
+        "fixtures/quickbooks/statement-preamble-footer.csv",
+        "fixtures/quickbooks/three-to-four-columns.csv",
+        "fixtures/quickbooks/four-to-three-columns.csv",
+        "fixtures/quickbooks/both-split-amounts.csv",
+        "fixtures/quickbooks/split-direction-unconfirmed.csv",
+        "fixtures/quickbooks/split-direction-bank.csv",
+        "fixtures/quickbooks/split-direction-intuit.csv",
+        "fixtures/quickbooks/mixed-currency-bank.csv",
+        "fixtures/quickbooks/mixed-currency-symbols.csv",
+        "fixtures/quickbooks/split-mixed-currency-symbols.csv",
+        "fixtures/quickbooks/explicit-currency-symbol-conflict.csv"
+      ],
+      "faq": [
+        {
+          "question": "How do the accepted layouts differ?",
+          "answer": "In three columns, Amount is negative for money out and positive for money in. In four columns, fill a single unsigned amount per row and leave the other cell blank."
+        },
+        {
+          "question": "Why is a direction choice needed for my Credit and Debit columns?",
+          "answer": "Intuit’s current sample places a payment in Credit and a deposit in Debit. Some banks use Credit for deposits and Debit for withdrawals. Compare known transactions in your source file and check the Money Spent and Money Received mapping at upload."
+        },
+        {
+          "question": "Can the converter choose between two amounts in the same row?",
+          "answer": "Check the original transaction before fixing the row. Both values stay visible for review. Recognized statement headers and summary totals appear in the removed-rows audit."
+        },
+        {
+          "question": "Can one bank CSV contain multiple currencies?",
+          "answer": "Use a separate file for each account currency. The two QuickBooks layouts have no currency field. ImportMedic checks the source currency column or flags conflicting symbols in the amount columns when the source omits currency codes."
+        }
+      ],
+      "sources": [
+        {
+          "title": "Intuit — Format CSV bank transactions for QuickBooks (US)",
+          "url": "https://quickbooks.intuit.com/learn-support/en-us/help-article/bank-transactions/format-csv-files-excel-bank-transactions-quickbooks/L4BjLWckq_US_en_US",
+          "kind": "official"
+        },
+        {
+          "title": "Intuit — Accepted bank CSV formats and one-sided amounts (UK)",
+          "url": "https://quickbooks.intuit.com/learn-support/en-uk/help-article/bank-transactions/prepare-csv-file-bank-upload-quickbooks/L4BjLWckq_GB_en_GB",
+          "kind": "official"
+        },
+        {
+          "title": "Intuit — Manually upload transactions into QuickBooks Online",
+          "url": "https://quickbooks.intuit.com/learn-support/en-us/help-article/import-transactions/manually-upload-transactions-quickbooks-online/L0rE9OXBz_US_en_US",
+          "kind": "official"
+        },
+        {
+          "title": "Intuit AU — QuickBooks Online user manual, bank CSV field mapping",
+          "url": "https://quickbooks.intuit.com/oidam/intuit/sbseg/en_au/quickbooks-online/web/content/QuickBooks_SMB_user_manual-2022.pdf",
+          "kind": "official"
+        },
+        {
+          "title": "QuickBooks Community — Bank feed shows spent as received and vice versa",
+          "url": "https://quickbooks.intuit.com/community/banking-4/bank-feed-imported-incorrectly-spent-showing-as-received-and-vice-versa-27333",
+          "kind": "community"
+        }
+      ]
+    },
+    {
+      "code": "multi-currency",
+      "platform": "stripe-paypal",
+      "title": "Convert a Stripe payout reconciliation CSV for QuickBooks",
+      "symptom": "The itemized Stripe export includes timestamp, gross, fee, net and currency columns that do not fit the QuickBooks bank CSV layout.",
+      "trigger": "The Stripe report describes individual balance transactions. The QuickBooks three-column layout expects a date, description and one signed amount per row.",
+      "slug": "stripe-payout-csv-to-quickbooks",
+      "before": "created_utc,description,gross,fee,net,currency\n2026-11-24T23:57:23Z,Card payment,85.00,2.77,82.23,usd",
+      "after": "Date,Description,Amount\n11/24/2026,Card payment,82.23",
+      "fixMode": "conditional",
+      "fixtures": [
+        "fixtures/stripe-paypal/stripe-balance-itemized-utc.csv",
+        "fixtures/stripe-paypal/stripe-payout-to-quickbooks.csv",
+        "fixtures/stripe-paypal/stripe-invalid-net.csv",
+        "fixtures/stripe-paypal/stripe-mixed-currencies-qbo.csv",
+        "fixtures/stripe-paypal/stripe-mixed-currencies-accounting.csv",
+        "fixtures/stripe-paypal/stripe-currency-symbol-conflict.csv",
+        "fixtures/stripe-paypal/stripe-invalid-currency.csv",
+        "fixtures/stripe-paypal/stripe-payments-missing-net.csv"
+      ],
+      "faq": [
+        {
+          "question": "Which Stripe export should I use?",
+          "answer": "Use an itemized Balance or Payout reconciliation CSV that includes the transaction date, description, gross, fee, net and currency. The accounting export retains those amount fields and currency for review."
+        },
+        {
+          "question": "Can I use the Payments CSV if Net is missing?",
+          "answer": "Download the itemized Balance or Payout reconciliation CSV with Net included. A Payments export can contain uncaptured or refunded payments. Amount and Fee alone do not establish the balance movement."
+        },
+        {
+          "question": "What if the CSV includes more than one currency?",
+          "answer": "Use the accounting export to review the currencies, or prepare a separate file for each matching account currency. The three-column layout has no currency column. A mixed currency or a symbol that contradicts the source code blocks conversion."
+        },
+        {
+          "question": "Can I post the itemized result directly as deposits in my bank account?",
+          "answer": "Use processor activity for the corresponding clearing account. For bank deposits, match the actual payout on your bank statement to the Stripe payout and its reconciliation detail."
+        }
+      ],
+      "sources": [
+        {
+          "title": "Stripe Docs — Payout reconciliation report",
+          "url": "https://docs.stripe.com/reports/payout-reconciliation",
+          "kind": "official"
+        },
+        {
+          "title": "Stripe Docs — Balance summary report and itemized CSV columns",
+          "url": "https://docs.stripe.com/reports/balance",
+          "kind": "official"
+        },
+        {
+          "title": "Intuit — Format CSV bank transactions for QuickBooks (US)",
+          "url": "https://quickbooks.intuit.com/learn-support/en-us/help-article/bank-transactions/format-csv-files-excel-bank-transactions-quickbooks/L4BjLWckq_US_en_US",
+          "kind": "official"
+        },
+        {
+          "title": "r/Accounting — Export dates, fee detail and extra columns complicate QuickBooks import",
+          "url": "https://www.reddit.com/r/Accounting/comments/1rfh0wn/how_are_you_handling_stripe_imports_into/",
+          "kind": "community"
+        },
+        {
+          "title": "Stripe Support ? Exporting Payment data and choosing a reconciliation report",
+          "url": "https://support.stripe.com/questions/exporting-payment-data?locale=en-GB",
+          "kind": "official"
+        }
+      ]
+    },
+    {
+      "code": "paypal-memo-removed",
+      "platform": "stripe-paypal",
+      "title": "Filter PayPal Memo rows by Balance Impact",
+      "symptom": "A PayPal Activity Download includes authorization or other informational rows alongside movements that affect the balance.",
+      "trigger": "PayPal sets Balance Impact to Memo on informational entries. Looking at the Net amount alone can make such a row appear to be a balance movement.",
+      "slug": "paypal-balance-impact-csv",
+      "before": "Type,Net,Balance Impact\nAuthorization,14.00,Memo\nExpress Checkout Payment,82.23,Credit",
+      "after": "Date,Description,Amount\n11/24/2026,Workshop Shop,82.23",
+      "fixMode": "conditional",
+      "fixtures": [
+        "fixtures/stripe-paypal/paypal-memo-filter.csv",
+        "fixtures/stripe-paypal/paypal-memo-retained.csv",
+        "fixtures/stripe-paypal/paypal-memo-secondary-currency.csv",
+        "fixtures/stripe-paypal/paypal-bank-impact-conflict.csv"
+      ],
+      "faq": [
+        {
+          "question": "What does a PayPal Balance Impact value of Memo mean?",
+          "answer": "The report separates Memo activity from Debit and Credit entries that change the balance. An authorization can have a reported amount while its balance impact is Memo."
+        },
+        {
+          "question": "Are Memo records always removed?",
+          "answer": "Turn on Exclude PayPal Memo rows when preparing balance activity. The audit lists the original line numbers removed. Leave that option off when you need the informational rows in an accounting export."
+        },
+        {
+          "question": "Which amount goes into the QuickBooks three-column export?",
+          "answer": "Amount comes from the transaction Net field. The report’s Balance value is the running balance after the entry. An unknown Balance Impact or a Net sign that conflicts with Debit or Credit requires review before bank export."
+        }
+      ],
+      "sources": [
+        {
+          "title": "PayPal Developer — Activity Download report and Balance Impact",
+          "url": "https://developer.paypal.com/reports/activity-download",
+          "kind": "official"
+        },
+        {
+          "title": "Intuit — Format CSV bank transactions for QuickBooks (US)",
+          "url": "https://quickbooks.intuit.com/learn-support/en-us/help-article/bank-transactions/format-csv-files-excel-bank-transactions-quickbooks/L4BjLWckq_US_en_US",
+          "kind": "official"
+        },
+        {
+          "title": "QuickBooks Community — PayPal CSV download does not match QuickBooks import",
+          "url": "https://quickbooks.intuit.com/community/banking-4/paypal-connections-26676",
+          "kind": "community"
+        }
+      ]
+    },
+    {
+      "code": "missing-title",
+      "platform": "shopify-products",
+      "title": "Supply the product title on its first row",
+      "symptom": "A product line has a handle but Shopify reports that it did not contain product data.",
+      "trigger": "Title is blank on the first row for a product.",
+      "slug": null,
+      "before": "winter-mug,,MUG-WINTER,19.50",
+      "after": "winter-mug,Winter Mug,MUG-WINTER,19.50",
+      "fixMode": "manual",
+      "fixtures": [
+        "fixtures/shopify/missing-primary-title.csv"
+      ],
+      "faq": [
+        {
+          "question": "Which title should I enter?",
+          "answer": "Use the name from your product catalog on the first row of its handle group. Later rows for the same product may leave Title blank."
+        }
+      ],
+      "sources": [
+        {
+          "title": "Shopify Help Center — Troubleshooting product CSV imports",
+          "url": "https://help.shopify.com/en/manual/products/import-export/common-import-issues",
+          "kind": "official"
+        },
+        {
+          "title": "Shopify Help Center — Product CSV format and required columns",
+          "url": "https://help.shopify.com/en/manual/products/import-export/using-csv",
+          "kind": "official"
+        }
+      ]
+    },
+    {
+      "code": "missing-handle",
+      "platform": "shopify-products",
+      "title": "Supply the handle for a product variant",
+      "symptom": "The variant row has no handle linking it to the right product.",
+      "trigger": "The Handle field is blank on a variant row.",
+      "slug": null,
+      "before": ",Studio Cap,Color,Green,CAP-GRN,26.00",
+      "after": "studio-cap,Studio Cap,Color,Green,CAP-GRN,26.00",
+      "fixMode": "manual",
+      "fixtures": [
+        "fixtures/shopify/missing-variant-handle.csv"
+      ],
+      "faq": [
+        {
+          "question": "Should each variant get a different handle?",
+          "answer": "Variants of one product share its handle. Use the exact existing product handle when updating a Shopify product."
+        }
+      ],
+      "sources": [
+        {
+          "title": "Shopify Help Center — Product CSV format and required columns",
+          "url": "https://help.shopify.com/en/manual/products/import-export/using-csv",
+          "kind": "official"
+        }
+      ]
+    },
+    {
+      "code": "invalid-inventory-qty",
+      "platform": "shopify-products",
+      "title": "Review an invalid Shopify inventory quantity",
+      "symptom": "Shopify reports that the inventory quantity is blank or not a number.",
+      "trigger": "A quantity for a tracked variant is empty or is not a whole number.",
+      "slug": null,
+      "before": "Variant Inventory Tracker: shopify | Variant Inventory Qty: six",
+      "after": "Variant Inventory Tracker: shopify | Variant Inventory Qty: 6 (after checking stock)",
+      "fixMode": "manual",
+      "fixtures": [
+        "fixtures/shopify/non-numeric-inventory.csv",
+        "fixtures/shopify/tracked-blank-inventory.csv"
+      ],
+      "faq": [
+        {
+          "question": "Does the product CSV apply to all locations?",
+          "answer": "Shopify documents the product CSV inventory quantity for stores with a single location. Use its dedicated inventory CSV for quantities across multiple locations."
+        }
+      ],
+      "sources": [
+        {
+          "title": "Shopify Help Center — Troubleshooting product CSV imports",
+          "url": "https://help.shopify.com/en/manual/products/import-export/common-import-issues",
+          "kind": "official"
+        },
+        {
+          "title": "Shopify Help Center — Product CSV format and required columns",
+          "url": "https://help.shopify.com/en/manual/products/import-export/using-csv",
+          "kind": "official"
+        }
+      ]
+    },
+    {
+      "code": "invalid-image-url",
+      "platform": "shopify-products",
+      "title": "Replace a Shopify product image path with a public URL",
+      "symptom": "Shopify cannot download the product image or resolve its host.",
+      "trigger": "Image Src contains a local path, a missing host, or a malformed URL.",
+      "slug": null,
+      "before": "file:///C:/Photos/candle.jpg",
+      "after": "https://cdn.example.org/candle.jpg (illustrative URL)",
+      "fixMode": "manual",
+      "fixtures": [
+        "fixtures/shopify/invalid-image-urls.csv"
+      ],
+      "faq": [
+        {
+          "question": "Does ImportMedic check whether the URL actually loads?",
+          "answer": "It checks the URL syntax locally. Open the real direct HTTPS image URL separately and confirm that it is publicly accessible."
+        }
+      ],
+      "sources": [
+        {
+          "title": "Shopify Help Center — Troubleshooting product CSV imports",
+          "url": "https://help.shopify.com/en/manual/products/import-export/common-import-issues",
+          "kind": "official"
+        },
+        {
+          "title": "Shopify Help Center — Product CSV format and required columns",
+          "url": "https://help.shopify.com/en/manual/products/import-export/using-csv",
+          "kind": "official"
+        },
+        {
+          "title": "Shopify Community — Missing Title error despite a visible Title column",
+          "url": "https://community.shopify.com/t/how-to-fix-an-error-when-importing-products-from-excel/218606",
+          "kind": "community"
+        }
+      ]
+    },
+    {
+      "code": "row-width",
+      "platform": "shopify-products",
+      "title": "Review a Shopify record with unexpected columns",
+      "symptom": "A record has more fields than the header, or ends before the last optional columns.",
+      "trigger": "A comma in a field was left unquoted, a delimiter was added, or optional trailing cells were omitted.",
+      "slug": null,
+      "before": "shoe-rack,Shoe Rack,RACK-01,23.50,Steel, black",
+      "after": "shoe-rack,Shoe Rack,RACK-01,23.50,\"Steel, black\"",
+      "fixMode": "conditional",
+      "fixtures": [
+        "fixtures/shopify/overflow-after-multiline.csv",
+        "fixtures/shopify/short-trailing-cells.csv"
+      ],
+      "faq": [
+        {
+          "question": "What can be fixed automatically?",
+          "answer": "An unambiguous row with short trailing cells can be padded. Check unexpected extra fields against the original file before choosing how to correct the row."
+        }
+      ],
+      "sources": [
+        {
+          "title": "Shopify Help Center — Troubleshooting product CSV imports",
+          "url": "https://help.shopify.com/en/manual/products/import-export/common-import-issues",
+          "kind": "official"
+        },
+        {
+          "title": "Shopify Help Center — Product CSV format and required columns",
+          "url": "https://help.shopify.com/en/manual/products/import-export/using-csv",
+          "kind": "official"
+        }
+      ]
+    },
+    {
+      "code": "csv-parse-error",
+      "platform": "shopify-products",
+      "title": "Repair an unclosed quote in a Shopify CSV record",
+      "symptom": "The importer reports a missing or stray quote.",
+      "trigger": "A double quote opens a text field and the record ends without a matching closing quote.",
+      "slug": null,
+      "before": "pine-frame,Pine Frame,FRAME-L,28.00,\"<p>Solid pine, unfinished.</p>",
+      "after": "pine-frame,Pine Frame,FRAME-L,28.00,\"<p>Solid pine, unfinished.</p>\"",
+      "fixMode": "manual",
+      "fixtures": [
+        "fixtures/shopify/unclosed-description-quote.csv"
+      ],
+      "faq": [
+        {
+          "question": "How do I keep a comma in a description?",
+          "answer": "Wrap the complete field in straight double quotes. Write a literal double quote inside that field as two consecutive double quotes."
+        }
+      ],
+      "sources": [
+        {
+          "title": "Shopify Help Center — Troubleshooting product CSV imports",
+          "url": "https://help.shopify.com/en/manual/products/import-export/common-import-issues",
+          "kind": "official"
+        },
+        {
+          "title": "Shopify Community — Product CSV fails with illegal quoting after variant edits",
+          "url": "https://community.shopify.com/t/error-al-importar-productos-csv-illegal-quoting/241485",
+          "kind": "community"
+        }
+      ]
+    },
+    {
+      "code": "row-width",
+      "platform": "stripe-paypal",
+      "title": "Check a PayPal activity row with extra fields",
+      "symptom": "The line has more CSV fields than the PayPal Activity Download header.",
+      "trigger": "A field was split by an unquoted comma or an extra delimiter was introduced while editing the export.",
+      "slug": null,
+      "before": "Name,Notes\nMarket Shop,Return, confirmed",
+      "after": "Name,Notes\nMarket Shop,\"Return, confirmed\"",
+      "fixMode": "manual",
+      "fixtures": [
+        "fixtures/stripe-paypal/paypal-overflow-row.csv"
+      ],
+      "faq": [
+        {
+          "question": "Can I remove the extra value without checking?",
+          "answer": "Compare the malformed line with the original PayPal export so you can restore the correct field boundaries and keep the transaction data."
+        }
+      ],
+      "sources": [
+        {
+          "title": "PayPal Developer — Activity Download report and Balance Impact",
+          "url": "https://developer.paypal.com/reports/activity-download",
+          "kind": "official"
+        },
+        {
+          "title": "Intuit — Common errors for importing bank transactions using CSV",
+          "url": "https://quickbooks.intuit.com/learn-support/en-global/help-article/import-transactions/common-errors-importing-bank-transactions-using/L02IgW462_ROW_en",
+          "kind": "official"
+        }
+      ]
+    }
+  ]
+}

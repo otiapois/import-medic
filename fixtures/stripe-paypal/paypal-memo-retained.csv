@@ -1,0 +1,3 @@
+Date,Time,Time Zone,Name,Type,Status,Currency,Gross,Fee,Net,Transaction ID,Balance,Balance Impact
+24/11/2026,10:04:12,GMT,Sample Market,Express Checkout Payment,Completed,GBP,65.00,-2.19,62.81,DEMO-PP-010,126.31,Credit
+24/11/2026,10:10:18,GMT,Sample Market,Authorization,Pending,GBP,14.00,0.00,14.00,DEMO-PP-011,126.31,Memo

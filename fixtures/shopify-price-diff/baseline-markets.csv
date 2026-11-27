@@ -1,0 +1,4 @@
+Handle,Title,Option1 Name,Option1 Value,Variant SKU,Variant Price,Price / UAE,Compare At Price / UAE,Price / European Union,Compare At Price / European Union,Included / UAE,Body (HTML),Tags,Image Src,Variant Inventory Qty
+filter,Filter & Travel Case,Color,Red,00001,10.000,036.7250,49.95,11.90,13.00,true,"<p>Original, description</p>",travel,https://example.test/red.png,11
+filter,,,Blue,00002,09.000,,,10.50,12.00,true,,,,7
+filter,,,,,,,,,,,,,https://example.test/blue.png,

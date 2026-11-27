@@ -1,0 +1,6 @@
+﻿Handle,Title,Option1 Name,Option1 Value,Variant SKU,Variant Price,Inventory quantity,Variant Compare At Price,Tags,Image Src
+duffel,Travel Duffel,Color,Red,0001,010.000,00020,25.00,"tags,original",
+duffel,,,Blue,0002,011.00,0000,,,
+duffel,,,,,,,,,https://example.invalid/bag.png
+case,Transit Case,Title,Default Title,0003,030.00,,40.000,keep,
+no-change,Unused,Title,Default Title,0009,31.00,4,,untouched,

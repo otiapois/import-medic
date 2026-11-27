@@ -1,0 +1,4 @@
+created_utc,description,gross,fee,net,currency,balance_transaction_id
+2026-11-24 18:31:53,Shop sale,84.00,2.74,81.26,USD,txn_demo301
+2026-11-24 19:08:43,Wholesale sale,100.00,3.70,96.30,EUR,txn_demo302
+2026-11-25 11:04:11,Card refund,-40.00,0.00,-40.00,USD,txn_demo303

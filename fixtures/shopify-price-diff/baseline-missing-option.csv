@@ -1,0 +1,8 @@
+Handle,Title,Body (HTML),Tags,Image Src,Image Position,Option1 Name,Option1 Value,Option2 Name,Option2 Value,Option3 Name,Option3 Value,Variant SKU,Variant Price,Variant Compare At Price,Option1 Linked To
+canvas-jacket,  Canvas Jacket  ,"<p>Waxed canvas,
+river green.</p>","outerwear, fall",https://example.invalid/a.png,1,Color,Forest,Size,S,Finish,Matte,00123,100.00,130.00,
+canvas-jacket,,,,,,,Forest,,XL,,Matte,00045-XL,20.00,28.00,
+canvas-jacket,,,,,,,Sand,,,,Gloss,00046-L,22.00,,
+canvas-jacket,,,,https://example.invalid/b.png,2,,,,,,,,,,
+travel-pouch,Travel Pouch,<p>Product copy stays put.</p>,travel,https://example.invalid/c.png,1,Color,Black,Size,One,,,P-01,16.00,24.00,
+travel-pouch,,,,,,,Brown,,One,,,P-02,17.00,,

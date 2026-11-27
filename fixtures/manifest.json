@@ -1,0 +1,339 @@
+{
+  "schemaVersion": 1,
+  "fixtures": [
+    {
+      "file": "fixtures/shopify/utf8-bom.csv",
+      "platform": "shopify-products",
+      "expectedManual": [],
+      "expectedIssueCodes": ["header-normalized"]
+    },
+    {
+      "file": "fixtures/shopify/windows-1252-smart-punctuation.csv",
+      "platform": "shopify-products",
+      "expectedManual": [],
+      "expectedIssueCodes": ["encoding-repaired"]
+    },
+    {
+      "file": "fixtures/shopify/utf16le-supplier-export.csv",
+      "platform": "shopify-products",
+      "expectedManual": []
+    },
+    {
+      "file": "fixtures/shopify/mixed-line-endings-multiline.csv",
+      "platform": "shopify-products",
+      "expectedManual": [],
+      "expectedIssueCodes": ["line-ending-repaired"]
+    },
+    {
+      "file": "fixtures/shopify/missing-title-header.csv",
+      "platform": "shopify-products",
+      "expectedManual": [{"code": "missing-header", "row": 1, "column": "Title"}]
+    },
+    {
+      "file": "fixtures/shopify/missing-primary-title.csv",
+      "platform": "shopify-products",
+      "expectedManual": [{"code": "missing-title", "row": 2, "column": "Title"}]
+    },
+    {
+      "file": "fixtures/shopify/missing-variant-handle.csv",
+      "platform": "shopify-products",
+      "expectedManual": [{"code": "missing-handle", "row": 2, "column": "Handle"}]
+    },
+    {
+      "file": "fixtures/shopify/continuation-variants-and-image.csv",
+      "platform": "shopify-products",
+      "expectedManual": [],
+      "expectedIssueCodes": ["price-normalized", "handle-normalized"]
+    },
+    {
+      "file": "fixtures/shopify/duplicate-variant-skus.csv",
+      "platform": "shopify-products",
+      "expectedManual": [{"code": "duplicate-sku", "row": 2, "column": "Variant SKU"}, {"code": "duplicate-sku", "row": 3, "column": "Variant SKU"}]
+    },
+    {
+      "file": "fixtures/shopify/invalid-variant-price.csv",
+      "platform": "shopify-products",
+      "expectedManual": [{"code": "invalid-price", "row": 2, "column": "Variant Price"}]
+    },
+    {
+      "file": "fixtures/shopify/negative-variant-price.csv",
+      "platform": "shopify-products",
+      "expectedManual": [{"code": "invalid-price", "row": 2, "column": "Variant Price"}]
+    },
+    {
+      "file": "fixtures/shopify/legacy-compare-at-price.csv",
+      "platform": "shopify-products",
+      "expectedManual": [{"code": "invalid-price", "row": 2, "column": "Variant Compare At Price"}],
+      "expectedIssueCodes": ["header-normalized"]
+    },
+    {
+      "file": "fixtures/shopify/non-numeric-inventory.csv",
+      "platform": "shopify-products",
+      "expectedManual": [{"code": "invalid-inventory-qty", "row": 2, "column": "Variant Inventory Qty"}]
+    },
+    {
+      "file": "fixtures/shopify/tracked-blank-inventory.csv",
+      "platform": "shopify-products",
+      "expectedManual": [{"code": "invalid-inventory-qty", "row": 2, "column": "Variant Inventory Qty"}]
+    },
+    {
+      "file": "fixtures/shopify/invalid-image-urls.csv",
+      "platform": "shopify-products",
+      "expectedManual": [{"code": "invalid-image-url", "row": 2, "column": "Image Src"}, {"code": "invalid-image-url", "row": 3, "column": "Image Src"}]
+    },
+    {
+      "file": "fixtures/shopify/modern-shopify-headers.csv",
+      "platform": "shopify-products",
+      "expectedManual": [],
+      "expectedIssueCodes": ["header-normalized"]
+    },
+    {
+      "file": "fixtures/shopify/short-trailing-cells.csv",
+      "platform": "shopify-products",
+      "expectedManual": []
+    },
+    {
+      "file": "fixtures/shopify/overflow-after-multiline.csv",
+      "platform": "shopify-products",
+      "expectedManual": [{"code": "row-width", "row": 4, "column": "CSV row"}]
+    },
+    {
+      "file": "fixtures/shopify/unclosed-description-quote.csv",
+      "platform": "shopify-products",
+      "expectedManual": [{"code": "csv-parse-error", "row": 2, "column": "CSV row"}]
+    },
+    {
+      "file": "fixtures/quickbooks/ambiguous-dates.csv",
+      "platform": "quickbooks-bank",
+      "options": {"dateOrder": "auto"},
+      "expectedManual": [{"code": "date-order-ambiguous", "row": 2, "column": "Date"}, {"code": "date-order-ambiguous", "row": 3, "column": "Date"}]
+    },
+    {
+      "file": "fixtures/quickbooks/date-order-inferred-mdy.csv",
+      "platform": "quickbooks-bank",
+      "options": {"dateOrder": "auto"},
+      "expectedManual": [],
+      "expectedIssueCodes": ["date-normalized"]
+    },
+    {
+      "file": "fixtures/quickbooks/date-order-selected-dmy.csv",
+      "platform": "quickbooks-bank",
+      "options": {"dateOrder": "DMY"},
+      "expectedManual": []
+    },
+    {
+      "file": "fixtures/quickbooks/amount-parentheses.csv",
+      "platform": "quickbooks-bank",
+      "options": {"qboLayout": "3col"},
+      "expectedManual": [],
+      "expectedIssueCodes": ["amount-normalized"]
+    },
+    {
+      "file": "fixtures/quickbooks/statement-preamble-footer.csv",
+      "platform": "quickbooks-bank",
+      "expectedManual": [],
+      "expectedRemovedRows": [1, 2, 6, 7],
+      "expectedIssueCodes": ["bank-preamble", "bank-footer"]
+    },
+    {
+      "file": "fixtures/quickbooks/three-to-four-columns.csv",
+      "platform": "quickbooks-bank",
+      "options": {"qboLayout": "4col"},
+      "expectedManual": [],
+      "expectedIssueCodes": ["layout-converted"]
+    },
+    {
+      "file": "fixtures/quickbooks/four-to-three-columns.csv",
+      "platform": "quickbooks-bank",
+      "options": {"qboLayout": "3col"},
+      "expectedManual": [],
+      "expectedIssueCodes": ["layout-converted"]
+    },
+    {
+      "file": "fixtures/quickbooks/both-split-amounts.csv",
+      "platform": "quickbooks-bank",
+      "options": {"qboLayout": "4col", "qboCreditDebit": "intuit"},
+      "expectedManual": [{"code": "credit-debit-conflict", "row": 2, "column": "Credit"}]
+    },
+    {
+      "file": "fixtures/quickbooks/invalid-amount.csv",
+      "platform": "quickbooks-bank",
+      "expectedManual": [{"code": "invalid-amount", "row": 2, "column": "Amount"}]
+    },
+    {
+      "file": "fixtures/quickbooks/mixed-currency-bank.csv",
+      "platform": "quickbooks-bank",
+      "expectedDownload": false,
+      "expectedManual": [{"code": "multi-currency", "row": 3, "column": "Currency"}]
+    },
+    {
+      "file": "fixtures/quickbooks/mixed-currency-symbols.csv",
+      "platform": "quickbooks-bank",
+      "expectedDownload": false,
+      "expectedManual": [{"code": "multi-currency", "row": 3, "column": "Amount"}]
+    },
+    {
+      "file": "fixtures/quickbooks/split-mixed-currency-symbols.csv",
+      "platform": "quickbooks-bank",
+      "options": {"qboLayout": "4col", "qboCreditDebit": "intuit"},
+      "expectedDownload": false,
+      "expectedManual": [{"code": "multi-currency", "row": 3, "column": "Debit"}]
+    },
+    {
+      "file": "fixtures/quickbooks/ambiguous-currency-grouping.csv",
+      "platform": "quickbooks-bank",
+      "expectedManual": [{"code": "invalid-amount", "row": 2, "column": "Amount"}]
+    },
+    {
+      "file": "fixtures/quickbooks/explicit-currency-symbol-conflict.csv",
+      "platform": "quickbooks-bank",
+      "expectedDownload": false,
+      "expectedManual": [{"code": "invalid-amount", "row": 2, "column": "Amount"}]
+    },
+    {
+      "file": "fixtures/quickbooks/missing-amount-and-date.csv",
+      "platform": "quickbooks-bank",
+      "expectedManual": [{"code": "missing-amount", "row": 2, "column": "Amount"}, {"code": "missing-date", "row": 3, "column": "Date"}]
+    },
+    {
+      "file": "fixtures/quickbooks/impossible-date.csv",
+      "platform": "quickbooks-bank",
+      "expectedManual": [{"code": "invalid-date", "row": 2, "column": "Date"}]
+    },
+    {
+      "file": "fixtures/quickbooks/quoted-multiline-description.csv",
+      "platform": "quickbooks-bank",
+      "expectedManual": []
+    },
+    {
+      "platform": "quickbooks-bank",
+      "file": "fixtures/quickbooks/split-direction-unconfirmed.csv",
+      "options": {"qboLayout": "3col", "qboCreditDebit": "auto"},
+      "expectedManual": [{"code": "credit-debit-direction", "row": 1, "column": "Credit/Debit"}]
+    },
+    {
+      "platform": "quickbooks-bank",
+      "file": "fixtures/quickbooks/split-direction-bank.csv",
+      "options": {"qboLayout": "3col", "qboCreditDebit": "bank"},
+      "expectedManual": []
+    },
+    {
+      "platform": "quickbooks-bank",
+      "file": "fixtures/quickbooks/split-direction-intuit.csv",
+      "options": {"qboLayout": "3col", "qboCreditDebit": "intuit"},
+      "expectedManual": []
+    },
+    {
+      "file": "fixtures/stripe-paypal/stripe-balance-itemized-utc.csv",
+      "platform": "stripe-paypal",
+      "options": {"stripePayPalOutput": "accounting"},
+      "expectedManual": []
+    },
+    {
+      "file": "fixtures/stripe-paypal/stripe-payout-to-quickbooks.csv",
+      "platform": "stripe-paypal",
+      "options": {"stripePayPalOutput": "quickbooks-3col"},
+      "expectedManual": []
+    },
+    {
+      "file": "fixtures/stripe-paypal/stripe-invalid-net.csv",
+      "platform": "stripe-paypal",
+      "expectedManual": [{"code": "invalid-amount", "row": 2, "column": "Net"}]
+    },
+    {
+      "file": "fixtures/stripe-paypal/stripe-currency-symbol-conflict.csv",
+      "platform": "stripe-paypal",
+      "options": {"stripePayPalOutput": "quickbooks-3col"},
+      "expectedDownload": false,
+      "expectedManual": [{"code": "invalid-amount", "row": 2, "column": "Net"}]
+    },
+    {
+      "file": "fixtures/stripe-paypal/paypal-bank-impact-conflict.csv",
+      "platform": "stripe-paypal",
+      "options": {"stripePayPalOutput": "quickbooks-3col"},
+      "expectedDownload": false,
+      "expectedManual": [
+        {"code": "balance-impact-conflict", "row": 2, "column": "Net"},
+        {"code": "invalid-balance-impact", "row": 3, "column": "Balance Impact"}
+      ]
+    },
+    {
+      "file": "fixtures/stripe-paypal/stripe-mixed-currencies-qbo.csv",
+      "platform": "stripe-paypal",
+      "options": {"stripePayPalOutput": "quickbooks-3col"},
+      "expectedManual": [{"code": "multi-currency", "row": 3, "column": "Currency"}]
+    },
+    {
+      "file": "fixtures/stripe-paypal/stripe-mixed-currencies-accounting.csv",
+      "platform": "stripe-paypal",
+      "options": {"stripePayPalOutput": "accounting"},
+      "expectedManual": []
+    },
+    {
+      "file": "fixtures/stripe-paypal/stripe-invalid-currency.csv",
+      "platform": "stripe-paypal",
+      "expectedManual": [{"code": "invalid-currency", "row": 2, "column": "Currency"}]
+    },
+    {
+      "file": "fixtures/stripe-paypal/paypal-memo-filter.csv",
+      "platform": "stripe-paypal",
+      "options": {"stripePayPalOutput": "quickbooks-3col", "excludePayPalMemo": true},
+      "expectedManual": [],
+      "expectedRemovedRows": [3],
+      "expectedIssueCodes": ["paypal-memo-removed"]
+    },
+    {
+      "file": "fixtures/stripe-paypal/paypal-memo-retained.csv",
+      "platform": "stripe-paypal",
+      "options": {"dateOrder": "DMY", "stripePayPalOutput": "accounting", "excludePayPalMemo": false},
+      "expectedManual": [],
+      "expectedRemovedRows": []
+    },
+    {
+      "file": "fixtures/stripe-paypal/paypal-memo-secondary-currency.csv",
+      "platform": "stripe-paypal",
+      "options": {"stripePayPalOutput": "quickbooks-3col", "excludePayPalMemo": true},
+      "expectedManual": [],
+      "expectedRemovedRows": [3],
+      "expectedIssueCodes": ["paypal-memo-removed"]
+    },
+    {
+      "file": "fixtures/stripe-paypal/paypal-overflow-row.csv",
+      "platform": "stripe-paypal",
+      "expectedManual": [{"code": "row-width", "row": 2, "column": "CSV row"}]
+    },
+    {
+      "file": "fixtures/stripe-paypal/stripe-payments-missing-net.csv",
+      "platform": "stripe-paypal",
+      "options": {"stripePayPalOutput": "quickbooks-3col"},
+      "expectedManual": [{"code": "missing-header", "row": 1, "column": "Net"}]
+    },
+    {
+      "file": "fixtures/quickbooks/m9-mixed-currency-physical-lines.csv",
+      "platform": "quickbooks-bank",
+      "options": {"qboLayout": "4col"},
+      "expectedDownload": false,
+      "expectedManual": [
+        {"code": "multi-currency", "row": 5, "column": "Currency"},
+        {"code": "multi-currency", "row": 6, "column": "Currency"},
+        {"code": "multi-currency", "row": 7, "column": "Currency"},
+        {"code": "multi-currency", "row": 8, "column": "Currency"}
+      ],
+      "expectedRemovedRows": [1, 10]
+    },
+    {
+      "file": "fixtures/stripe-paypal/m9-paypal-currency-split.csv",
+      "platform": "stripe-paypal",
+      "options": {"stripePayPalOutput": "accounting", "excludePayPalMemo": true},
+      "expectedManual": [],
+      "expectedRemovedRows": [4]
+    },
+    {
+      "file": "fixtures/stripe-paypal/m9-paypal-reconciliation.csv",
+      "platform": "stripe-paypal",
+      "options": {"stripePayPalOutput": "accounting"},
+      "expectedDownload": false,
+      "expectedManual": [{"code": "reconciliation-mismatch", "row": 3, "column": "Net"}]
+    }
+  ]
+}

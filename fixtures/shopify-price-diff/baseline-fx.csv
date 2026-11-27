@@ -1,0 +1,5 @@
+Handle,Title,Option1 Name,Option1 Value,Variant SKU,Variant Price,Variant Compare At Price,Tags,Image Src
+boots,"  Alpine, ""Black""  ",Color,Black,001,020.000,,keep,
+boots,,,Blue,002,25.000,035.000,sibling,
+boots,,,,,,,,https://example.invalid/boots.png
+hat,Hat,Title,Default Title,003,8.500,10.000,untouched,

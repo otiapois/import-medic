@@ -1,0 +1,37 @@
+.campaign-panel .campaign-settings {
+  min-width: 0;
+  margin: 17px 0 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.campaign-settings legend, .campaign-review h4 { font-weight: 700; }
+.campaign-settings legend { padding-inline: 4px; }
+.campaign-field { display: grid; gap: 4px; align-content: start; min-width: 0; }
+.campaign-field :is(input, select, textarea) { width: 100%; min-width: 0; }
+.campaign-field textarea {
+  padding: 6px 9px;
+  border: 1px solid var(--control-line);
+  border-radius: 7px;
+  color: var(--ink);
+  background: var(--surface);
+  resize: vertical;
+}
+.campaign-options { display: grid; gap: 6px; margin-top: 10px; }
+.campaign-options .checkbox-label { font-size: .875rem; font-weight: 640; }
+.campaign-demo-note { margin-top: 8px; }
+.campaign-review { min-width: 0; margin-top: 21px; padding-top: 15px; border-top: 1px solid var(--line); }
+.campaign-review > .field-help, .campaign-table .button { margin-top: 5px; }
+.campaign-review .campaign-metrics { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.campaign-review .preview-card, .campaign-downloads, .campaign-import-note { margin-top: 10px; }
+.campaign-review .campaign-table { width: 100%; min-width: 610px; table-layout: fixed; }
+.campaign-table th, .campaign-table td { vertical-align: top; overflow-wrap: anywhere; }
+.campaign-table tbody th { width: 21%; max-width: 26ch; }
+.campaign-table tbody td:nth-child(-n+4) { width: 15%; }
+.campaign-table code { white-space: pre-wrap; }
+.campaign-row-issues { display: grid; gap: 4px; margin-top: 5px; }
+
+@media (max-width: 490px) {
+  .campaign-review .campaign-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

@@ -1,0 +1,5 @@
+ID,Type,SKU,Name,Parent,Regular price,Sale price,Stock,Description,Categories,Images,Meta:source
+4100,variable,00040,Synthetic Canvas Set,,,,,Parent listing,Synthetic,https://example.invalid/parent.png,fixture
+4101,variation,00123,Synthetic Canvas Set - Small,00040,50.50,40.00,008,Small listing,Synthetic,https://example.invalid/small.png,fixture
+4102,variation,00124,Synthetic Canvas Set - Large,id:4100,39.99,,010,Large listing,Synthetic,https://example.invalid/large.png,fixture
+4103,simple,00125,Synthetic Travel Case,,155.00,,006,Case listing,Synthetic,https://example.invalid/case.png,fixture

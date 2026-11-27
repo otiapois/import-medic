@@ -1,0 +1,5 @@
+URL handle,Title,Option1 Name,Option1 Value,SKU,Price,Compare-at price,Tags,Description,Image Src,Price / UAE
+sale-demo,"  Lanterns, <img src=https://example.invalid/>  ",Color,Red,0001,024.000,,"Sale, Ramadan","<p>Keep exact</p>",,44.00
+sale-demo,,,Blue,0002,010.000,014.250,,,,40.00
+sale-demo,,,Green,0003,025.000,040.000,,,,41.00
+separate,Other product,Title,Default Title,0004,35.000,,Keep,,,51.00

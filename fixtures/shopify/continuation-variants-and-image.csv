@@ -1,0 +1,4 @@
+Handle,Title,Option1 Name,Option1 Value,Variant SKU,Variant Price,Image Src,Image Position
+Workshop Tote!,Workshop Tote,Color,Sand,TOTE-SAND,"$1,299.50", https://cdn.example.org/tote-sand.jpg ,1
+Workshop Tote!,,Color,Ink,TOTE-INK,$35.00,https://cdn.example.org/tote-ink.jpg,2
+Workshop Tote!,,,,,,https://cdn.example.org/tote-detail.jpg,3

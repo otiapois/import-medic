@@ -1,0 +1,3 @@
+created_utc,description,gross,fee,net,currency,balance_transaction_id
+2026-11-24 18:31:53,Sale of tray,"$1,295.00",$38.21,"$1,256.79",usd,txn_demo100
+2026-11-25 04:11:30,Tray returned,-45.00,0.00,-45.00,usd,txn_demo101

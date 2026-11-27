@@ -1,0 +1,572 @@
+import { lazy, Suspense, useEffect, useId, useMemo, useRef, useState } from 'react';
+import type { ColumnSelection, ColumnSuggestions, DiffIssue } from '../../core/shopify-price-diff/types';
+import type { SupplierRecipe } from '../../core/shopify-price-diff/recipe';
+import type { StorePlatform, WorkspaceProfile } from '../../core/shopify-price-diff/workspace-profile';
+import type { WorkbenchWorker } from '../../core/worker/client';
+import type { BaselineMeta, SupplierMeta } from '../../core/worker/protocol';
+import demoBaseline from '../../../fixtures/shopify-price-diff/baseline-agency.csv?raw';
+import demoSupplier from '../../../fixtures/shopify-price-diff/supplier-agency.csv?raw';
+import wooDemoBaseline from '../../../fixtures/woocommerce-price-diff/baseline.csv?raw';
+import wooDemoSupplier from '../../../fixtures/woocommerce-price-diff/supplier.csv?raw';
+import { BIGCOMMERCE_DEMO } from './bigCommerceDemo';
+import { ModeNavigation } from './ModeNavigation';
+import { PriceDiffIssues } from './PriceDiffIssues';
+import { PriceFileInput } from './PriceFileInput';
+import { recipeRemapping } from './supplierRecipe';
+import type { MappingField } from './supplierRecipe';
+import { TabBar } from './TabBar';
+import { useWorkerSession, WorkerStatus } from './workerSession';
+import { STORE_PLATFORMS, withWorkspaceDefaults, WorkspaceProfileControls } from './WorkspaceProfile';
+
+const PriceDiffReview = lazy(() => import('./PriceDiffReview').then(({ PriceDiffReview }) => ({ default: PriceDiffReview })));
+const VerifyImportPanel = lazy(() => import('./VerifyImportPanel'));
+const PromoCampaignPanel = lazy(() => import('./promo/PromoCampaignPanel'));
+
+const STUDIO_MODES = [
+  { id: 'build', label: 'Build Update' },
+  { id: 'verify', label: 'Verify Update / Rollback CSV' },
+  { id: 'campaign', label: 'Sale Campaign Pack' },
+] as const;
+
+type StudioMode = typeof STUDIO_MODES[number]['id'];
+type PairMode = Exclude<StudioMode, 'verify'>;
+
+const FILE_FIELDS = {
+  baseline: {
+    title: 'Shopify baseline export',
+    formats: 'Drop a Shopify product CSV',
+    label: 'Choose Shopify baseline CSV',
+    accept: '.csv',
+    extension: /\.csv$/i,
+    invalid: 'Choose one Shopify baseline file with a .csv extension.',
+  },
+  supplier: {
+    title: 'Supplier price sheet',
+    formats: 'Drop a supplier CSV or XLSX',
+    label: 'Choose supplier price sheet',
+    accept: '.csv,.xlsx',
+    extension: /\.(csv|xlsx)$/i,
+    invalid: 'Choose one supplier file with a .csv or .xlsx extension.',
+  },
+};
+
+const WOO_BASELINE_FIELD = {
+  ...FILE_FIELDS.baseline,
+  title: 'WooCommerce baseline export',
+  formats: 'Drop a WooCommerce Products CSV export',
+  label: 'Choose WooCommerce baseline CSV',
+  invalid: 'Choose one WooCommerce baseline file with a .csv extension.',
+};
+
+const BIGCOMMERCE_BASELINE_FIELD = {
+  ...FILE_FIELDS.baseline,
+  title: 'BigCommerce baseline export',
+  formats: 'Drop a legacy BigCommerce Bulk Edit CSV export',
+  label: 'Choose BigCommerce baseline CSV',
+  invalid: 'Choose one BigCommerce baseline file with a .csv extension.',
+};
+
+const DEMOS = {
+  shopify: { label: 'Load Synthetic Agency Demo', baseline: demoBaseline, baselineName: 'baseline-agency.csv', supplier: demoSupplier, supplierName: 'supplier-agency.csv' },
+  woocommerce: { label: 'Load Synthetic WooCommerce Demo', baseline: wooDemoBaseline, baselineName: 'woocommerce-baseline-synthetic.csv', supplier: wooDemoSupplier, supplierName: 'woocommerce-supplier-synthetic.csv' },
+  bigcommerce: { ...BIGCOMMERCE_DEMO, label: 'Load Synthetic BigCommerce Demo' },
+};
+
+type FileSide = keyof typeof FILE_FIELDS;
+type LocalFile = { file: File; synthetic: boolean };
+type SupplierInput = { file?: LocalFile; recipeFile?: File; sheetChoice?: number; error?: string };
+
+export interface GeneratedPairSource {
+  platform: StorePlatform;
+  market?: ShopMarket;
+  baseline: File;
+  load: () => Promise<{ update: File; rollback: File }>;
+}
+
+type ShopMarket = NonNullable<BaselineMeta['markets']>[number];
+
+export interface PriceMapping {
+  sheetIndex: number;
+  sheetMissing: boolean;
+  recipeBlocked: boolean;
+  suggestions: ColumnSuggestions;
+  selection: ColumnSelection;
+  diagnostics: string[];
+  missing: MappingField[];
+  remapped: boolean;
+}
+
+interface RecipeLoad {
+  recipe: SupplierRecipe | null;
+  recipeErrors: string[];
+}
+
+interface PreparedSupplier extends RecipeLoad {
+  supplier?: SupplierMeta;
+  mapping?: PriceMapping;
+}
+
+export interface ReviewSource extends RecipeLoad {
+  id: string;
+  label: string;
+  labelOverride?: string;
+  mapping: PriceMapping;
+  headers: readonly string[];
+  issues: readonly DiffIssue[];
+}
+
+export interface MappingDraft {
+  selection: ColumnSelection;
+  remapped: boolean;
+  unresolved: readonly MappingField[];
+}
+
+export type MappingDrafts = Readonly<Record<string, MappingDraft>>;
+
+interface PreparedFiles {
+  baseline?: BaselineMeta;
+  suppliers: Readonly<Record<string, PreparedSupplier>>;
+}
+
+const PRIMARY = 'primary';
+const EMPTY_RECIPE: RecipeLoad = { recipe: null, recipeErrors: [] };
+const sourceLabel = (filename: string) => filename.slice(0, 120);
+
+export function PriceDiffWorkbench({ characterKeys }: { characterKeys: boolean }) {
+  const heading = useId();
+  const [mode, setMode] = useState<StudioMode>('build');
+  const [verifyVisited, setVerifyVisited] = useState(false);
+  const [campaignVisited, setCampaignVisited] = useState(false);
+  const [pairMode, setPairMode] = useState<PairMode>('build');
+  const [buildPair, setBuildPair] = useState<GeneratedPairSource | null>(null);
+  const [campaignPair, setCampaignPair] = useState<GeneratedPairSource | null>(null);
+  const [platform, setPlatform] = useState<StorePlatform>('shopify');
+  const [marketName, setMarketName] = useState<string>();
+  const [targetChanged, setTargetChanged] = useState(false);
+  const [pendingPlatform, setPendingPlatform] = useState<StorePlatform | null>(null);
+  const platformControls = useRef<HTMLDivElement>(null);
+  const [profile, setProfile] = useState<WorkspaceProfile | null>(null);
+  const [profileRevision, setProfileRevision] = useState(0);
+  const [baselineFile, setBaselineFile] = useState<LocalFile>();
+  const [baselineError, setBaselineError] = useState('');
+  const [supplierInputs, setSupplierInputs] = useState<Record<string, SupplierInput>>({ [PRIMARY]: {} });
+  const [order, setOrder] = useState<string[]>([PRIMARY]);
+  const [labels, setLabels] = useState<Record<string, string>>({});
+  const [drafts, setDrafts] = useState<MappingDrafts>({});
+  const nextSupplier = useRef(2);
+  const [validWorker, setValidWorker] = useState(false);
+  const loaded = useRef<{ worker: WorkbenchWorker; baseline?: BaselineMeta; suppliers: Readonly<Record<string, SupplierMeta | undefined>> } | null>(null);
+  const imported = useRef(new WeakMap<File, RecipeLoad>());
+  const session = useWorkerSession();
+  const { run, invalidate, reset, cancel, resume, paused, progress, error, finished } = session;
+  const inputs = useMemo(() => ({ baselineFile, supplierInputs }), [baselineFile, supplierInputs]);
+  const [prepared, setPrepared] = useState<{ data: PreparedFiles; inputs: typeof inputs; worker: WorkbenchWorker } | null>(null);
+  const active = prepared?.inputs === inputs ? prepared.data : null;
+  const busy = Boolean(progress) || paused;
+  const multiple = order.length > 1;
+  const platformLabel = STORE_PLATFORMS[platform];
+  const woo = platform === 'woocommerce';
+  const bigCommerce = platform === 'bigcommerce';
+  const baselineField = woo ? WOO_BASELINE_FIELD : bigCommerce ? BIGCOMMERCE_BASELINE_FIELD : FILE_FIELDS.baseline;
+  const markets = active?.baseline?.markets;
+  const market = markets?.find(({ name }) => name === marketName);
+
+  useEffect(() => {
+    const { baselineFile, supplierInputs } = inputs;
+    const entries = Object.entries(supplierInputs);
+    if (paused || (!baselineFile && !entries.some(([, { file, recipeFile }]) => file || recipeFile))) return;
+    void run(async ({ worker, progress: update, isCurrent }): Promise<PreparedFiles> => {
+      if (loaded.current?.worker !== worker) {
+        const [baseline, suppliers] = await Promise.all([
+          baselineFile ? worker.request({ type: 'loadBaseline', file: baselineFile.file, platform }, update) : undefined,
+          Promise.all(entries.map(async ([supplierId, { file }]) => [
+            supplierId, file ? await worker.request({ type: 'loadSupplier', supplierId, file: file.file }, update) : undefined,
+          ] as const)),
+        ]);
+        if (!isCurrent()) throw new Error('The price files changed.');
+        loaded.current = { worker, baseline, suppliers: Object.fromEntries(suppliers) };
+      }
+      const { baseline, suppliers } = loaded.current;
+      const details = await Promise.all(entries.map(async ([supplierId, { sheetChoice, recipeFile }]): Promise<[string, PreparedSupplier]> => {
+        const supplier = suppliers[supplierId];
+        let recipeLoad = recipeFile ? imported.current.get(recipeFile) : undefined;
+        if (recipeFile && !recipeLoad) {
+          const response = await worker.request({ type: 'loadRecipe', file: recipeFile }, update);
+          recipeLoad = response.ok
+            ? { recipe: response.value, recipeErrors: [] }
+            : { recipe: null, recipeErrors: response.diagnostics.map(({ message }) => message) };
+          imported.current.set(recipeFile, recipeLoad);
+        }
+        const recipeDetails = recipeLoad ?? EMPTY_RECIPE;
+        const { recipe, recipeErrors } = recipeDetails;
+        if (!baseline || !supplier?.sheets.length || supplier.issues.some(({ blocking }) => blocking)) {
+          return [supplierId, { supplier, ...recipeDetails }];
+        }
+        const applied = recipe ? await worker.request({
+          type: 'applyRecipe',
+          supplierId,
+          sheetIndex: sheetChoice ?? 0,
+          recipe: sheetChoice === undefined ? recipe : { ...recipe, sheetName: null },
+        }) : null;
+        if (!isCurrent()) throw new Error('The supplier worksheet changed.');
+        const sheetIndex = applied?.ok ? applied.value.sheetIndex : sheetChoice ?? Math.max(0, supplier.sheets.findIndex(({ name }) => name === recipe?.sheetName));
+        const diagnostics = applied && !applied.ok ? applied.diagnostics : [];
+        const sheetMissing = diagnostics.some(({ field }) => field === 'sheetName');
+        const recipeBlocked = diagnostics.some(({ code }) => code === 'unsafe-supplier-sheet' || code === 'unsupported-woo-recipe' || code === 'unsupported-bigcommerce-recipe');
+        const remapped = Boolean(recipe?.sheetName && sheetChoice !== undefined && supplier.sheets[sheetIndex].name !== recipe.sheetName);
+        const suggestions = await worker.request({ type: 'priceSettings', supplierId, sheetIndex });
+        const recovery = recipe && applied && !applied.ok && !recipeBlocked ? recipeRemapping(recipe, supplier.sheets[sheetIndex].headers) : null;
+        const selection = applied?.ok ? applied.value.selection : recovery?.selection ?? {
+          ...suggestions.selection,
+          joinKey: baseline.hasSku && suggestions.skuColumns.length > 0 && suggestions.handleColumns.length > 0 &&
+            suggestions.optionColumns[0].length > 0 ? undefined : suggestions.selection.joinKey,
+          skuColumn: suggestions.skuColumns.length === 1 ? suggestions.skuColumns[0] : undefined,
+          handleColumn: suggestions.handleColumns.length === 1 ? suggestions.handleColumns[0] : undefined,
+          optionColumns: suggestions.optionColumns.map((columns) => columns.length === 1 ? columns[0] : null),
+          priceColumn: suggestions.priceColumns.length === 1 ? suggestions.priceColumns[0] : undefined,
+          confirmed: !suggestions.requiresConfirmation && recipeErrors.length === 0,
+        };
+        return [supplierId, {
+          supplier, ...recipeDetails,
+          mapping: {
+            sheetIndex, sheetMissing, recipeBlocked, suggestions, selection, remapped,
+            diagnostics: diagnostics.map(({ message }) => message),
+            missing: recovery?.missing ?? [],
+          },
+        }];
+      }));
+      return { baseline, suppliers: Object.fromEntries(details) };
+    }, (data, worker) => {
+      setPrepared((previous) => ({ data: previous?.inputs === inputs ? previous.data : data, inputs, worker }));
+      setValidWorker(true);
+    }, baselineFile || entries.some(([, { file }]) => file) ? 'reading' : 'parsing');
+  }, [inputs, paused, platform, run]);
+
+  function clearPriceReport(reloadFiles: boolean) {
+    setBuildPair(null);
+    if (reloadFiles) {
+      reset();
+      setValidWorker(false);
+      loaded.current = null;
+      setPrepared(null);
+      return;
+    }
+    // A label or order change is applied when the pending file read completes.
+    // Invalidating the shared session during that read would discard its result.
+    if (!active || !validWorker) return;
+    invalidate();
+    void prepared?.worker.request({ type: 'invalidatePrice' }).catch(() => undefined);
+  }
+
+  function updateSupplier(id: string, change: Partial<SupplierInput>, reloadFile: boolean) {
+    clearPriceReport(reloadFile);
+    setDrafts(({ [id]: removed, ...remaining }) => remaining);
+    setSupplierInputs((previous) => ({ ...previous, [id]: { ...previous[id], ...change } }));
+  }
+
+  function replaceBaseline(file: LocalFile | undefined) {
+    clearPriceReport(true);
+    setDrafts({});
+    setMarketName(undefined);
+    setTargetChanged(false);
+    setBaselineFile(file);
+  }
+
+  function load(side: FileSide, choices: FileList, supplierId?: string) {
+    if (!choices.length) return;
+    const file = choices[0];
+    const field = side === 'baseline' ? baselineField : FILE_FIELDS.supplier;
+    const correct = choices.length === 1 && field.extension.test(file.name);
+    const next = correct ? { file, synthetic: false } : undefined;
+    const error = correct ? '' : field.invalid;
+    if (supplierId) {
+      setLabels(({ [supplierId]: removed, ...remaining }) => remaining);
+      updateSupplier(supplierId, { file: next, sheetChoice: undefined, error }, true);
+    } else {
+      setBaselineError(error);
+      replaceBaseline(next);
+    }
+  }
+
+  function resetBatch() {
+    clearPriceReport(true);
+    setDrafts({});
+    setMarketName(undefined);
+    setTargetChanged(false);
+    setBaselineError('');
+    setLabels({});
+    setOrder([PRIMARY]);
+  }
+
+  function switchPlatform(next: StorePlatform) {
+    resetBatch();
+    setBaselineFile(undefined);
+    setSupplierInputs({ [PRIMARY]: {} });
+    setProfile(null);
+    setPendingPlatform(null);
+    setPlatform(next);
+    platformControls.current?.querySelector<HTMLButtonElement>(`[data-platform="${next}"]`)?.focus({ preventScroll: true });
+  }
+
+  function choosePlatform(next: StorePlatform) {
+    if (platform === next) setPendingPlatform(null);
+    else if (baselineFile || profile || Object.values(supplierInputs).some(({ file, recipeFile }) => file || recipeFile)) setPendingPlatform(next);
+    else switchPlatform(next);
+  }
+
+  function loadDemo() {
+    resetBatch();
+    const demo = DEMOS[platform];
+    setBaselineFile({ file: new File([demo.baseline], demo.baselineName, { type: 'text/csv' }), synthetic: true });
+    setSupplierInputs({
+      [PRIMARY]: { file: { file: new File([demo.supplier], demo.supplierName, { type: 'text/csv' }), synthetic: true } },
+    });
+  }
+
+  function addSupplier() {
+    if (order.length >= 3) return;
+    clearPriceReport(false);
+    const id = `supplier-${nextSupplier.current++}`;
+    setSupplierInputs((previous) => ({ ...previous, [id]: {} }));
+    setOrder((previous) => [...previous, id]);
+  }
+
+  function moveSupplier(index: number, direction: -1 | 1) {
+    clearPriceReport(false);
+    setOrder((previous) => {
+      const next = [...previous];
+      [next[index], next[index + direction]] = [next[index + direction], next[index]];
+      return next;
+    });
+  }
+
+  function clearSupplier(id: string) {
+    setLabels(({ [id]: removed, ...remaining }) => remaining);
+    if (multiple) {
+      clearPriceReport(true);
+      setDrafts(({ [id]: removed, ...remaining }) => remaining);
+      setSupplierInputs(({ [id]: removed, ...remaining }) => remaining);
+      setOrder((previous) => previous.filter((supplierId) => supplierId !== id));
+      document.getElementById(heading)?.focus({ preventScroll: true });
+    } else {
+      updateSupplier(id, { file: undefined, sheetChoice: undefined, error: undefined }, true);
+    }
+  }
+
+  const reviewSources = useMemo((): ReviewSource[] | null => {
+    if (!active) return null;
+    const sources: ReviewSource[] = [];
+    for (const id of order) {
+      const { supplier, mapping, recipe, recipeErrors } = active.suppliers[id];
+      if (!supplier || !mapping) return null;
+      const { headers, issues } = supplier.sheets[mapping.sheetIndex];
+      const labelOverride = labels[id]?.trim() || undefined;
+      const defaults = profile && !recipe ? { ...mapping, selection: withWorkspaceDefaults(mapping.selection, profile) } : mapping;
+      sources.push({ id, label: labelOverride ?? sourceLabel(supplier.name), labelOverride, mapping: defaults, headers, issues, recipe, recipeErrors });
+    }
+    return sources;
+  }, [active, labels, order, profile]);
+
+  function applyProfile(value: WorkspaceProfile) {
+    clearPriceReport(false);
+    setDrafts((previous) => Object.fromEntries(Object.entries(previous).map(([id, draft]) => [id,
+      supplierInputs[id]?.recipeFile ? draft : { ...draft, selection: withWorkspaceDefaults(draft.selection, value) },
+    ])));
+    setProfile(value);
+    setProfileRevision((revision) => revision + 1);
+  }
+
+  const profileSelection = drafts[order[0]]?.selection ?? reviewSources?.[0].mapping.selection;
+  const targetSelector = markets?.length ? (
+    <div className="price-target">
+      <div className="price-sheet">
+        <label htmlFor={`${heading}-target`}>Target price list</label>
+        <select id={`${heading}-target`} value={market?.name ?? ''} aria-describedby={`${heading}-target-help`}
+          onChange={(event) => {
+            const name = event.currentTarget.value || undefined;
+            clearPriceReport(false);
+            setTargetChanged(true);
+            setMarketName(name);
+            setDrafts((previous) => Object.fromEntries(Object.entries(previous).map(([id, draft]) => [id, {
+              ...draft, selection: { ...draft.selection, confirmed: false, sameCurrencyConfirmed: false, fxRateConfirmed: false },
+            }])));
+          }}>
+          <option value="">Base store (Variant Price)</option>
+          {markets.map(({ name, priceHeader }) => <option key={name} value={name}>{priceHeader}</option>)}
+        </select>
+      </div>
+      <p id={`${heading}-target-help`} className="field-help">
+        {market ? <>Only <code>{market.priceHeader}</code>{market.compareAtHeader ? <> and <code>{market.compareAtHeader}</code></> : null} can change. Use this market’s currency and confirm your columns again.</>
+          : 'Choose which Shopify price list to update.'}
+      </p>
+    </div>
+  ) : null;
+
+  function changeMode(next: StudioMode) {
+    setMode(next);
+    if (next === 'verify') setVerifyVisited(true);
+    else setPairMode(next);
+    if (next === 'campaign') setCampaignVisited(true);
+  }
+
+  function openCampaignVerification() {
+    changeMode('verify');
+    document.getElementById(`${heading}-verify-tab`)?.focus({ preventScroll: true });
+  }
+
+  const pairSource = pairMode === 'campaign' ? campaignPair : buildPair;
+  const workbenchLabel = {
+    build: `${platformLabel} Safe Price Update workbench`, verify: 'Verify Before Import workbench', campaign: 'Sale Campaign Pack workbench',
+  }[mode];
+
+  return (
+    <section className="workbench price-workbench" aria-label={workbenchLabel}>
+      <div className="workbench-input price-studio-top">
+        <ModeNavigation current="price" />
+        <TabBar id={heading} label="Price Update Studio mode" items={STUDIO_MODES} active={mode} className="price-studio-tabs"
+          onChange={changeMode} />
+      </div>
+      <div id={`${heading}-build-panel`} role="tabpanel" aria-labelledby={`${heading}-build-tab`} hidden={mode !== 'build'}>
+        <div className="workbench-input price-studio-pane">
+          <div className="price-section">
+            <div className="price-store-platform">
+              <span id={`${heading}-platform`}>Store platform</span>
+              <div className="price-platform-toggle" role="group" aria-labelledby={`${heading}-platform`} ref={platformControls}>
+                {(Object.keys(STORE_PLATFORMS) as StorePlatform[]).map((option) => (
+                  <button key={option} type="button" data-platform={option} aria-pressed={platform === option}
+                    onClick={() => choosePlatform(option)}>{STORE_PLATFORMS[option]}</button>
+                ))}
+              </div>
+            </div>
+            {pendingPlatform ? <div className="price-platform-confirm">
+              <p className="field-help" role="status">Switching to {STORE_PLATFORMS[pendingPlatform]} clears this batch and its workspace settings.</p>
+              <button type="button" className="button button-secondary button-small" onClick={() => switchPlatform(pendingPlatform)}>Switch to {STORE_PLATFORMS[pendingPlatform]}</button>
+              <button type="button" className="text-button" onClick={() => {
+                platformControls.current?.querySelector<HTMLButtonElement>(`[data-platform="${platform}"]`)?.focus({ preventScroll: true });
+                setPendingPlatform(null);
+              }}>Keep this batch</button>
+            </div> : null}
+            <div className="price-heading">
+              <div>
+                <h2 id={heading} tabIndex={-1}>{multiple ? `Add your ${platformLabel} baseline and supplier sheets` : 'Add your two price files'}</h2>
+                <p className="field-help">{multiple
+                  ? 'Add up to three supplier sheets. The order applies when you prefer the first or last supplier. Files stay in this browser.'
+                  : `Use a current ${platformLabel} product export and a supplier price sheet. Both files stay in this browser.`}</p>
+              </div>
+              <button type="button" className="button button-secondary" onClick={loadDemo}>{DEMOS[platform].label}</button>
+            </div>
+            {woo && baselineFile?.synthetic && supplierInputs[PRIMARY]?.file?.synthetic ? <p className="field-help">
+              For the synthetic cost sheet, select Tiered cost brackets before confirming the columns. You can also map Sale price and Stock.
+            </p> : null}
+            {bigCommerce && baselineFile?.synthetic && supplierInputs[PRIMARY]?.file?.synthetic ? <p className="field-help">
+              Optionally map Sale Price and Stock. The standalone mug has price, sale and stock changes. The shirt SKU has a stock-only change.
+            </p> : null}
+            {bigCommerce ? <p className="field-help catalog-import-note">Legacy Bulk Edit supports pricing for standalone products. For product groups with SKU rows, this studio supports tracked stock updates and holds pricing changes. SKU Price is read-only and SKU rows have no editable Sale Price.</p> : null}
+            <div className="price-files" data-multiple={multiple} role="group" aria-labelledby={heading}>
+              <PriceFileInput side="baseline" field={baselineField} file={baselineFile}
+                message={{ reading: Boolean(progress && baselineFile && !active), error: baselineError }}
+                onLoad={(choices) => load('baseline', choices)} onClear={() => { setBaselineError(''); replaceBaseline(undefined); }} />
+              <div className="price-supplier-area">
+                <ol className="price-supplier-stack" aria-label="Supplier sheet order" role="list">
+                  {order.map((supplierId, index) => {
+                    const { file, sheetChoice, error } = supplierInputs[supplierId];
+                    const previous = prepared?.inputs.supplierInputs[supplierId]?.file === file
+                      ? prepared?.data.suppliers[supplierId]?.supplier : undefined;
+                    const { supplier = previous, mapping, recipe, recipeErrors } = active?.suppliers[supplierId] ?? {};
+                    const position = index + 1;
+                    const sheet = supplier?.sheets[mapping?.sheetIndex ?? sheetChoice ?? 0];
+                    const showWorksheet = supplier && (supplier.sheets.length > 1 || mapping?.sheetMissing || sheetChoice !== undefined);
+                    return (
+                      <li key={supplierId}>
+                        <PriceFileInput side="supplier" field={FILE_FIELDS.supplier} position={multiple ? position : undefined} file={file}
+                          message={{ reading: Boolean(progress && file && !active), error }}
+                          onLoad={(choices) => load('supplier', choices, supplierId)}
+                          onClear={multiple ? undefined : () => clearSupplier(supplierId)}>
+                          {showWorksheet ? (
+                            <label className="price-sheet">{multiple ? `Supplier worksheet ${position}` : 'Supplier worksheet'}
+                              <select value={mapping?.sheetMissing ? '' : mapping?.sheetIndex ?? sheetChoice ?? 0} onChange={(event) => {
+                                updateSupplier(supplierId, { sheetChoice: Number(event.currentTarget.value) }, false);
+                              }}>
+                                {mapping?.sheetMissing ? <option value="" disabled>Choose replacement worksheet</option> : null}
+                                {supplier.sheets.map(({ name }, index) => <option key={index} value={index}>{name}</option>)}
+                              </select>
+                            </label>
+                          ) : null}
+                          {sheet ? (
+                            <p className="price-source-count field-help">{sheet.rowCount.toLocaleString('en-US')} {sheet.rowCount === 1 ? 'row' : 'rows'} in selected sheet</p>
+                          ) : null}
+                          {file && (multiple || labels[supplierId] !== undefined) ? (
+                            <label className="price-supplier-label">Supplier sheet label{multiple ? ` ${position}` : ''}
+                              <input type="text" value={labels[supplierId] ?? sourceLabel(file.file.name)} maxLength={120} onChange={(event) => {
+                                const label = event.currentTarget.value;
+                                clearPriceReport(false);
+                                setLabels((previous) => ({ ...previous, [supplierId]: label }));
+                              }} />
+                            </label>
+                          ) : null}
+                          {multiple ? (
+                            <div className="price-supplier-actions">
+                              <button type="button" className="text-button" aria-label={`Move supplier sheet ${position} up`}
+                                disabled={index === 0} onClick={() => moveSupplier(index, -1)}>Move up</button>
+                              <button type="button" className="text-button" aria-label={`Move supplier sheet ${position} down`}
+                                disabled={index === order.length - 1} onClick={() => moveSupplier(index, 1)}>Move down</button>
+                              <button type="button" className="text-button" aria-label={`Remove supplier sheet ${position}`}
+                                onClick={() => clearSupplier(supplierId)}>Remove</button>
+                            </div>
+                          ) : null}
+                          <PriceDiffIssues issues={supplier?.issues ?? []} title="Supplier file checks" />
+                          {!reviewSources && (recipe || recipeErrors?.length) ? (
+                            <div className="recipe-retained">
+                              {recipe ? <p className="field-help" role="status">Recipe loaded: {recipe.supplierLabel}. Add the price files to check the saved mapping.</p> : null}
+                              {recipeErrors?.map((message) => <p key={message} role="alert">{message}</p>)}
+                              <button type="button" className="text-button" disabled={busy}
+                                onClick={() => updateSupplier(supplierId, { recipeFile: undefined, sheetChoice: undefined }, false)}>Use manual mapping</button>
+                            </div>
+                          ) : null}
+                        </PriceFileInput>
+                      </li>
+                    );
+                  })}
+                </ol>
+                <button type="button" className="button button-secondary button-small" disabled={order.length >= 3}
+                  onClick={addSupplier}>+ Add another supplier sheet</button>
+              </div>
+            </div>
+            <WorkerStatus progress={progress} paused={paused} finished={finished} error={error} focusHeading={heading} onCancel={() => {
+              setValidWorker(false);
+              cancel();
+            }} onResume={resume} />
+            {!reviewSources ? <PriceDiffIssues issues={active?.baseline?.issues ?? []} title="Baseline file checks" /> : null}
+            {!reviewSources ? targetSelector : null}
+            <WorkspaceProfileControls key={platform} platform={platform} profile={profile} selection={profileSelection} onApply={applyProfile} />
+          </div>
+        </div>
+        {reviewSources ? (
+          <Suspense fallback={<p role="status">Opening price review…</p>}>
+            <PriceDiffReview key={profileRevision} platform={platform} workspaceCurrency={profile?.storeCurrency} session={session} worker={validWorker && !paused ? prepared?.worker ?? null : null}
+              sources={reviewSources} baselineIssues={active?.baseline?.issues ?? []} drafts={drafts} setDrafts={setDrafts}
+              baselineFile={baselineFile?.file} onPairAvailable={setBuildPair} characterKeys={characterKeys}
+              market={market} targetChanged={targetChanged} targetSelector={targetSelector}
+              onRecipe={(supplierId, file) => updateSupplier(supplierId, { recipeFile: file ?? undefined, sheetChoice: undefined }, false)} />
+          </Suspense>
+        ) : null}
+      </div>
+      <div id={`${heading}-verify-panel`} role="tabpanel" aria-labelledby={`${heading}-verify-tab`}
+        className="workbench-input price-studio-pane" hidden={mode !== 'verify'}>
+        {verifyVisited ? (
+          <Suspense fallback={<p className="price-section" role="status">Opening CSV verification…</p>}>
+            <VerifyImportPanel pairSource={pairSource} buildPlatform={platform} />
+          </Suspense>
+        ) : null}
+      </div>
+      <div id={`${heading}-campaign-panel`} role="tabpanel" aria-labelledby={`${heading}-campaign-tab`}
+        className="workbench-input price-studio-pane" hidden={mode !== 'campaign'}>
+        {campaignVisited ? (
+          <Suspense fallback={<p className="price-section" role="status">Opening Sale Campaign Pack…</p>}>
+            <PromoCampaignPanel initialPlatform={platform} onPairAvailable={setCampaignPair} onVerify={openCampaignVerification} />
+          </Suspense>
+        ) : null}
+      </div>
+    </section>
+  );
+}

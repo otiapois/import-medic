@@ -1,0 +1,43 @@
+{
+  "name": "import-medic",
+  "version": "1.2.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": "^20.19.0 || >=22.12.0"
+  },
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:fuzz": "vitest run tests/unit/core/fuzz.test.ts",
+    "build": "vite build && node scripts/prerender.mjs",
+    "preview": "vite preview --host 127.0.0.1",
+    "test:e2e": "playwright test",
+    "repair-cli": "tsx scripts/repair-cli.ts",
+    "export:public": "node scripts/export-public-tree.mjs"
+  },
+  "dependencies": {
+    "fast-xml-parser": "5.12.1",
+    "fflate": "0.8.2",
+    "papaparse": "^5.5.3",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "zod": "^4.1.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.56.0",
+    "@tailwindcss/vite": "^4.1.0",
+    "@types/node": "^24.0.0",
+    "@types/papaparse": "^5.3.16",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0",
+    "@vitejs/plugin-react": "^5.1.0",
+    "fast-check": "4.3.0",
+    "tailwindcss": "^4.1.0",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
+    "vite": "^7.2.0",
+    "vitest": "^4.0.0"
+  }
+}

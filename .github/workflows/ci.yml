@@ -1,0 +1,31 @@
+name: CI
+
+on: [push, pull_request]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - run: npm ci --ignore-scripts
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run test:fuzz
+      - run: npm run build
+      - name: Typecheck the public source snapshot
+        shell: bash
+        run: |
+          snapshot="$(mktemp -d "$RUNNER_TEMP/importmedic-public.XXXXXX")"
+          npm run export:public -- "$snapshot"
+          test ! -e "$snapshot/docs/research"
+          ln -s "$GITHUB_WORKSPACE/node_modules" "$snapshot/node_modules"
+          cd "$snapshot"
+          npm run typecheck
