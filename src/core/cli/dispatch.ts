@@ -4,6 +4,7 @@ import { buildInventorySync, inspectInventorySupplier, type InventorySupplierSou
 import { parseBigCommerceBaseline } from '../bigcommerce-price-diff';
 import { parseBom } from '../bom/rollup';
 import { buildCatalogMigration } from '../catalog-migrator/engine';
+import { buildCostCreep, costCreepFilenames, type CostCreepOptions, type CostCreepPeriod } from '../cost-creep/engine';
 import { buildPromoCampaign, type PromoCampaignOptions } from '../promo-campaign';
 import { createBookkeeperSignoffHtml } from '../repair/bookkeeper-signoff';
 import { parseBaseline, parseSupplier, suggestColumns, type ColumnSelection, type RowResolution, type SupplierDiffInput } from '../shopify-price-diff';
@@ -17,7 +18,7 @@ import { parseWooCommerceBaseline } from '../woocommerce-price-diff';
 import { repairAudit } from '../worker/repair-views';
 import { runPriceComparison } from '../whatif/simulator';
 
-export const cliModes = ['repair', 'price-diff', 'verify', 'promo', 'supplier-delta', 'migrate', 'inventory-sync'] as const;
+export const cliModes = ['repair', 'price-diff', 'verify', 'promo', 'supplier-delta', 'migrate', 'inventory-sync', 'cost-creep'] as const;
 export const storePlatforms = ['shopify', 'woocommerce', 'bigcommerce'] as const satisfies readonly StorePlatform[];
 export type CliMode = typeof cliModes[number];
 export interface CliFile { filename: string; bytes: Uint8Array }
@@ -56,6 +57,7 @@ export type CliRequest =
   | { mode: 'promo'; platform: StorePlatform; baseline: CliFile; costSheet?: CliFile; options: Omit<PromoCampaignOptions, 'costSheet'> }
   | { mode: 'supplier-delta'; previous: DeltaSource; next: DeltaSource }
   | { mode: 'inventory-sync'; baseline: CliFile; suppliers: CliInventorySupplier[]; options: InventorySyncOptions }
+  | { mode: 'cost-creep'; periods: readonly CostCreepPeriod[]; options?: CostCreepOptions }
   | { mode: 'migrate'; source: CliFile; sourcePlatform: StorePlatform; targetPlatform: StorePlatform };
 
 const utf8 = new TextEncoder();
@@ -226,6 +228,14 @@ export async function dispatchCli(request: CliRequest): Promise<CliResult> {
         : result('blocked', report);
     }
     case 'supplier-delta': return supplierDelta(request.previous, request.next);
+    case 'cost-creep': {
+      const { status, auditJson, historyCsv, briefHtml } = await buildCostCreep(request.periods, request.options);
+      const audit = artifact('audit-json', costCreepFilenames.auditJson, auditJson);
+      return status === 'ready' && historyCsv !== null && briefHtml !== null
+        ? result('ready', artifact('history-csv', costCreepFilenames.historyCsv, historyCsv), audit,
+          artifact('vendor-brief-html', costCreepFilenames.briefHtml, briefHtml))
+        : result('blocked', audit);
+    }
     case 'inventory-sync': {
       const suppliers = request.suppliers.map(({ columns, ...source }): InventorySupplierSource => {
         const { skuColumn, quantityColumn } = columns;

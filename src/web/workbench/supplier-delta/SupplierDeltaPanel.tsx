@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { PriceFileInput } from '../PriceFileInput';
 import { downloadFile } from '../downloads';
 import { useSignoffFingerprint } from '../CustodyFingerprints';
@@ -7,6 +7,8 @@ import { useSignoffBranding } from '../SignoffBranding';
 import { DeltaWorker } from './deltaWorker';
 import type { DeltaArtifact, DeltaInspection, DeltaMapping, DeltaSide, DeltaSummary } from './deltaWorker';
 import { DeltaResults } from './DeltaResults';
+
+const CostCreepPanel = lazy(() => import('../cost-creep/CostCreepPanel'));
 
 const FIELDS = {
   previous: { label: 'Previous', title: 'Previous supplier sheet', formats: 'Drop a supplier CSV or XLSX', choose: 'Choose previous supplier sheet' },
@@ -130,7 +132,7 @@ function DeltaSourcePicker({ side, selection }: { side: DeltaSide; selection: Re
   );
 }
 
-export default function SupplierDeltaPanel({ active }: { active: boolean }) {
+function TwoSheetDelta({ active }: { active: boolean }) {
   const heading = useId();
   const { branding } = useSignoffBranding();
   const workerRef = useRef<DeltaWorker | null>(null);
@@ -282,5 +284,31 @@ export default function SupplierDeltaPanel({ active }: { active: boolean }) {
       <LocalCliCommand mode="supplier-delta" getArguments={getCliArguments}
         unavailable="Wait for the selected sheets to be read or fix a file error to prepare the command." />
     </div>
+  );
+}
+
+export default function SupplierDeltaPanel({ active }: { active: boolean }) {
+  const [mode, setMode] = useState<'delta' | 'creep'>('delta');
+  const [creepVisited, setCreepVisited] = useState(false);
+  const id = useId();
+  return (
+    <>
+      <div className="price-section price-filters supplier-delta-modes" role="group" aria-label="Supplier Delta mode">
+        <button className="button button-secondary button-small" type="button" aria-pressed={mode === 'delta'} aria-controls={`${id}-delta`}
+          onClick={() => setMode('delta')}>2-Sheet Delta</button>
+        <button className="button button-secondary button-small" type="button" aria-pressed={mode === 'creep'} aria-controls={`${id}-creep`}
+          onClick={() => { setMode('creep'); setCreepVisited(true); }}>Multi-Period Cost Creep (2–6 sheets)</button>
+      </div>
+      <div id={`${id}-delta`} hidden={mode !== 'delta'}>
+        <TwoSheetDelta active={active && mode === 'delta'} />
+      </div>
+      <div id={`${id}-creep`} hidden={mode !== 'creep'}>
+        {creepVisited ? (
+          <Suspense fallback={<p className="price-section" role="status">Opening Multi-Period Cost Creep…</p>}>
+            <CostCreepPanel active={active && mode === 'creep'} />
+          </Suspense>
+        ) : null}
+      </div>
+    </>
   );
 }

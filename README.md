@@ -6,7 +6,7 @@ ImportMedic compares a Shopify, WooCommerce, or legacy BigCommerce product expor
 
 **Sale Campaign Pack** prepares a discount and its matched revert from one product export. It previews the final sale prices against a required minimum retail floor and packages the pair with a JSON audit and offline Campaign Sign-Off report.
 
-**Supplier Delta** compares a previous supplier pricebook with a new one. Review cost hikes, drops, added and removed SKUs before preparing a store update. Its CSV and offline sign-off are review reports for the two supplier files.
+**Supplier Delta** compares two supplier pricebooks or tracks cost creep across two to six periods. Review hikes, drops, and SKU availability. In the multi-period view, add store retail data to check gross margin changes and download a Vendor Negotiation Brief for offline review.
 
 **Migrate Catalog** converts a supported product CSV between Shopify, WooCommerce, and BigCommerce. Review parent and variant rows, pricing, source fields that need separate handling, and the file fingerprints before downloading a creation CSV for the destination platform.
 
@@ -74,10 +74,16 @@ Choose **Load Synthetic Kit BOM Demo** to try a nested example. Leaving the BOM 
 
 ### Compare two supplier pricebooks
 
-1. Open **Supplier Delta** in the price workbench. Add the previous and new CSV or XLSX pricebooks, or choose **Load Synthetic Supplier Delta Demo**. For multi-tab Excel files, set **Previous worksheet** and **New worksheet** as needed.
+1. Open **Supplier Delta** and choose **2-Sheet Delta** in the price workbench. Add the previous and new CSV or XLSX pricebooks, or choose **Load Synthetic Supplier Delta Demo**. For multi-tab Excel files, set **Previous worksheet** and **New worksheet** as needed.
 2. Check each SKU and cost or price mapping. Map inventory on either side if needed. Compare amounts in the same currency. Review the signed changes and use **Cost Hikes**, **Cost Drops**, **Added**, **Removed**, and **Blocked** to inspect matching rows and source lines.
 3. If duplicate SKUs or invalid mapped cells hold the CSV and sign-off, inspect the issue rows and download the JSON audit for review. Correct the files or mapping and compare again.
 4. Keep **Supplier Delta CSV**, **JSON Audit**, and **Delta Sign-Off (.html)** with the original pricebooks. The HTML shows the top hikes and includes filters that work offline. Its footer records the source and CSV SHA-256 digests. The JSON audit records those digests and the SHA-256 of the actual downloaded HTML bytes. An XLSX input digest covers the whole original workbook. [Supplier Delta contract](docs/subsystems/supplier-delta.md)
+
+### Track supplier cost creep across periods
+
+1. In **Supplier Delta**, choose **Multi-Period Cost Creep (2–6 sheets)** and **Load Synthetic 4-Quarter Cost-Creep Demo**, or add two to six supplier CSV or XLSX files in oldest-to-newest order. Enter a unique label per slot and check each worksheet, SKU column, and cost column. Keep SKUs with leading zeros in Excel text cells.
+2. Set **Cumulative creep threshold (%)**, which starts at `10`. The watchlist applies the inclusive threshold before rounding percentages for display. Review missing periods and consecutive hikes alongside the first and latest observed costs. For a margin comparison, add **Store Baseline CSV** with an exact SKU and a positive retail price in the same known currency as the supplier costs. Use **Cost currency** and **Baseline retail currency** for confirmed denominations. Both margins use the same supplied retail price.
+3. Keep **Cost-Creep CSV**, **Audit JSON**, and **Vendor Negotiation Brief (.html)** with the original files. Open the brief locally to review the ranked hikes and charts. It uses the current Agency Sign-Off Branding and displays input and history CSV hashes. Verify the exact HTML bytes against the separate JSON audit. A held comparison retains the audit with the affected period and source row. The history CSV is for supplier review. Use **Build Update** with a fresh catalog export to prepare a store update. [Cost-creep contract and file custody](docs/subsystems/cost-creep.md)
 
 ### Prepare a catalog migration
 
@@ -138,7 +144,7 @@ Open **Workspace profile** and set the store name and currency. Select **Save Wo
 
 ### Brand an offline sign-off
 
-Open **Workspace profile** and expand **Agency Sign-Off Branding**. Enter **Agency name** and choose Forest, Navy, Slate, or Burgundy. Use **Prepared for** and **Contact email or note** if needed. Check the preview before downloading a Client, Campaign, Supplier Delta, Migration, or Inventory Sign-Off from the price workbench. The report includes the supplied branding as text and opens offline.
+Open **Workspace profile** and expand **Agency Sign-Off Branding**. Enter **Agency name** and choose Forest, Navy, Slate, or Burgundy. Use **Prepared for** and **Contact email or note** if needed. Check the preview before downloading a Client, Campaign, Supplier Delta, Migration, or Inventory Sign-Off or a Vendor Negotiation Brief from the price workbench. The report includes the supplied branding as text and opens offline.
 
 Save the Workspace Profile JSON to reuse the branding after navigating away. In the home workbench, complete a repair and open **Agency Sign-Off Branding** by the Bookkeeper export. Set the branding there or use **Load Workspace Profile (.json)** to bring in the same branding before downloading the Bookkeeper Sign-Off. [Branding and Workspace Profile contract](docs/subsystems/web-ui-seo.md#agency-sign-off-branding)
 
@@ -176,7 +182,7 @@ From the source checkout with its locked dependencies installed, use `npm run --
 npm run --silent repair-cli -- --mode repair --platform xero-bank fixtures/xero-bank/balance-verified.csv --out-dir ./batches/xero-demo
 ```
 
-Use a separate output directory for each run. All seven explicit modes write `custody-manifest.json` alongside their available results.
+Use a separate output directory for each run. All eight explicit modes write `custody-manifest.json` alongside their available results.
 
 | Mode | Use it to prepare |
 | --- | --- |
@@ -187,6 +193,7 @@ Use a separate output directory for each run. All seven explicit modes write `cu
 | `supplier-delta` | A supplier review CSV, JSON audit, and offline delta sign-off |
 | `migrate` | A creation CSV, JSON audit, and offline migration sign-off |
 | `inventory-sync` | A Shopify inventory update and matched rollback for one location, JSON audit, and offline Inventory Sign-Off |
+| `cost-creep` | A multi-period supplier history CSV, JSON audit, and offline Vendor Negotiation Brief |
 
 Exit `0` means the local run passed. Exit `2` means the run held the CSV or rejected the candidate and left diagnostic files. Exit `1` means an argument, input/output, or execution error. The unsigned manifest lists the SHA-256 of the original input bytes and each emitted result. Keep it with the originals and outputs to check for byte changes.
 

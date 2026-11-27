@@ -145,6 +145,30 @@ Give `--baseline <csv>` for the Shopify **All states** export and one to three `
 
 A ready run writes `inventory-update.csv`, `inventory-rollback.csv`, `inventory-audit.json`, `inventory-sign-off.html`, and `custody-manifest.json`. A `no-changes` run exits `0`. A `blocked` run exits `2`. Both retain the audit, sign-off, and manifest without the native CSVs. [Inventory matching, quantity rules, and Shopify validation](inventory-sync.md)
 
+## cost-creep
+
+```sh
+npm run --silent repair-cli -- --mode cost-creep --period fixtures/cost-creep/q1.csv --period-label Q1 --period fixtures/cost-creep/q2.csv --period-label Q2 --period fixtures/cost-creep/q3.csv --period-label Q3 --period fixtures/cost-creep/q4.csv --period-label Q4 --baseline fixtures/cost-creep/store-retail.csv --out-dir ./batches/cost-creep-demo
+```
+
+Repeat `--period <csv|xlsx>` two to six times in oldest-to-newest order. After each path supply its `--period-label <label>` and any worksheet or column overrides for that slot. Labels must be unique. Column names are literal headers. Omitting a mapping uses the unique recognized suggestion when available.
+
+| Flag | Value or use |
+| --- | --- |
+| `--period-label`, `--period-label-b64` | Label shown in the audit and brief |
+| `--period-sheet`, `--period-sheet-b64` | Exact visible worksheet name for an XLSX period |
+| `--period-sku-column`, `--period-sku-column-b64` | Supplier SKU column |
+| `--period-cost-column`, `--period-cost-column-b64` | Supplier cost column |
+| `--creep-threshold-percent` | Nonnegative decimal percent. Defaults to `10`. Threshold comparison uses the exact ratio. |
+| `--currency` | Three-letter uppercase supplier cost currency declaration |
+| `--baseline` | Optional store retail CSV |
+| `--baseline-sku-column`, `--baseline-sku-column-b64` | Store baseline SKU column |
+| `--baseline-retail-column`, `--baseline-retail-column-b64` | Store baseline retail price column |
+| `--baseline-currency` | Three-letter uppercase store retail currency declaration |
+| `--workspace-profile` | Optional Workspace Profile JSON for the Vendor Negotiation Brief branding |
+
+Exit `0` writes `supplier-cost-creep.csv`, `supplier-cost-creep-audit.json`, `vendor-negotiation-brief.html`, and `custody-manifest.json`. Exit `2` writes the audit and manifest with source diagnostics. The receipt uses `period-1` through `period-6` for the supplied period slots and records the optional baseline and Workspace Profile when supplied. The history CSV is a supplier review report. [Cost-creep inputs, calculation, and reports](cost-creep.md)
+
 ## Legacy single-file repair
 
 Keep `--mode` absent for the original single-file interface.

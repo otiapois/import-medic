@@ -97,3 +97,10 @@ export function currenciesAgree(units: readonly string[]): boolean {
   const candidates = symbols[first] ?? [first];
   return candidates.some((code) => units.every((unit) => (symbols[unit] ?? [unit]).includes(code)));
 }
+
+export function resolvedCurrencyCode(units: readonly string[]): string | null {
+  const first = units[0];
+  if (first === undefined) return null;
+  const candidates = (symbols[first] ?? [first]).filter((code) => units.every((unit) => (symbols[unit] ?? [unit]).includes(code)));
+  return candidates.length === 1 ? candidates[0] : null;
+}

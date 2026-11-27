@@ -20,6 +20,9 @@ const b64 = (text: string) => Buffer.from(text, 'utf8').toString('base64url');
 const fixture = (file: string) => resolve(root, 'fixtures', file);
 const readyRepair = fixture('freshbooks-expenses/expenses-verified.csv');
 const reviewRepair = fixture('shopify/invalid-variant-price.csv');
+// Cold tsx startup competes with the other Vitest workers on Windows.
+const costCreepSpawnTimeout = 40_000;
+const costCreepTestTimeout = 100_000;
 let scratch: string;
 
 beforeAll(() => {
@@ -35,9 +38,9 @@ function content(name: string, value: string | Uint8Array): string {
   return filename;
 }
 
-function cli(args: string[], cwd = root) {
+function cli(args: string[], cwd = root, timeout = 15_000) {
   const run = spawnSync(process.execPath, ['--import', tsx, resolve(root, script), ...args], {
-    cwd, windowsHide: true, timeout: 15_000, env: { ...process.env, TEMP: scratch, TMP: scratch, TMPDIR: scratch },
+    cwd, windowsHide: true, timeout, env: { ...process.env, TEMP: scratch, TMP: scratch, TMPDIR: scratch },
   });
   if (run.error) throw run.error;
   return { ...run, stdout: run.stdout.toString('utf8'), stderr: run.stderr.toString('utf8') };
@@ -45,7 +48,7 @@ function cli(args: string[], cwd = root) {
 
 function verifyReceipt(mode: string, code: 0 | 2, status: string, directory: string,
   args: string[], inputs: Record<string, string>, outputFiles: string[], cwd?: string) {
-  const run = cli(['--mode', mode, ...args, '--out-dir', directory], cwd);
+  const run = cli(['--mode', mode, ...args, '--out-dir', directory], cwd, mode === 'cost-creep' ? costCreepSpawnTimeout : undefined);
   const outputPath = resolve(cwd ?? root, directory);
   const diagnostic = run.status === 2 && code !== 2
     ? readdirSync(outputPath).filter(name => /(?:-audit|-report)\.json$/.test(name)).map(name => readFileSync(resolve(outputPath, name), 'utf8')).join('\n')
@@ -75,6 +78,63 @@ function verifyReceipt(mode: string, code: 0 | 2, status: string, directory: str
 
 const pricingHeaders = 'Handle,Title,Option1 Name,Option1 Value,Variant SKU,Variant Price,Variant Compare At Price,Cost per item\n';
 const catalog = (price: string) => pricingHeaders + `part,Spare Part,Title,Default Title,0001,${price},,5.00\nkit,Bundle,Title,Default Title,KIT,20.00,,10.00\n`;
+
+describe('M20 real cost-creep CLI subprocess', () => {
+  it('writes exact branded reports or holds every analysis artifact on ambiguous data', () => {
+    const q1 = fixture('cost-creep/q1.csv');
+    const q2 = fixture('cost-creep/q2.csv');
+    const q3 = fixture('cost-creep/q3.csv');
+    const q4 = fixture('cost-creep/q4.csv');
+    const baseline = fixture('cost-creep/store-retail.csv');
+    const profile = content('agency.json', JSON.stringify({ version: 1, platform: 'shopify', storeName: 'Studio', storeCurrency: 'USD',
+      branding: { agencyName: 'Sand & Sea', preparedFor: 'Buyer', contactNote: 'Offline review', accentKey: 'navy' } }));
+    const periodArgs = ['--period', q1, '--period-label-b64', b64('Q1 · Prior'), '--period-cost-column-b64', b64('Cost USD'),
+      '--period', q2, '--period-label', 'Q2', '--period', q3, '--period-label', 'Q3'];
+    const ready = resolve(scratch, 'cost-creep-quarterly');
+    verifyReceipt('cost-creep', 0, 'ready', ready, [...periodArgs, '--period', q4, '--period-label', 'Q4',
+      '--baseline', baseline, '--baseline-retail-column', 'Retail Price USD', '--workspace-profile', profile, '--creep-threshold-percent', '10.000'],
+    { 'period-1': q1, 'period-2': q2, 'period-3': q3, 'period-4': q4, baseline, 'workspace-profile': profile },
+    ['supplier-cost-creep.csv', 'supplier-cost-creep-audit.json', 'vendor-negotiation-brief.html']);
+    const report = readFileSync(resolve(ready, 'vendor-negotiation-brief.html'));
+    const history = readFileSync(resolve(ready, 'supplier-cost-creep.csv'));
+    const audit = JSON.parse(readFileSync(resolve(ready, 'supplier-cost-creep-audit.json'), 'utf8'));
+    expect(report.toString()).toContain('Prepared by <strong>Sand &amp; Sea</strong>');
+    expect(audit.custody).toMatchObject({ historyCsvSha256: digest(history), briefHtmlSha256: digest(report),
+      periods: [{ label: 'Q1 · Prior' }, { label: 'Q2' }, { label: 'Q3' }, { label: 'Q4' }] });
+    expect(parseCsv(history.toString()).records[1].cells[0]).toBe('00098');
+
+    const conflicted = fixture('cost-creep/conflicting-offers.csv');
+    const held = resolve(scratch, 'cost-creep-held');
+    verifyReceipt('cost-creep', 2, 'blocked', held, [...periodArgs, '--period', conflicted, '--period-label', 'Q4'],
+      { 'period-1': q1, 'period-2': q2, 'period-3': q3, 'period-4': conflicted }, ['supplier-cost-creep-audit.json']);
+    const heldAudit = JSON.parse(readFileSync(resolve(held, 'supplier-cost-creep-audit.json'), 'utf8'));
+    expect(heldAudit.custody).not.toHaveProperty('briefHtmlSha256');
+    expect(heldAudit.custody).not.toHaveProperty('historyCsvSha256');
+    expect(heldAudit.issues).toMatchObject([{ code: 'conflicting-duplicate-sku', periodLabel: 'Q4', rows: [2, 4] }]);
+  }, costCreepTestTimeout);
+
+  it('resolves named visible sheets and literal digit headers, and rejects worksheet options on CSV', () => {
+    const before = content('digit-header.csv', 'SKU,1\n00042,8.00\n');
+    const sheet = fixture('shopify-price-diff/supplier-agency.xlsx');
+    const names = listWorkbookSheets(readFileSync(sheet));
+    const label = 'Earlier';
+    const ready = resolve(scratch, 'cost-creep-named-sheet');
+    verifyReceipt('cost-creep', 0, 'ready', ready, ['--period', before, '--period-label', label, '--period-cost-column', '1',
+      '--period', sheet, '--period-label', 'Later', '--period-sheet-b64', b64(names[0]), '--period-sku-column', 'SKU',
+      '--period-cost-column', 'New Price'],
+    { 'period-1': before, 'period-2': sheet },
+    ['supplier-cost-creep.csv', 'supplier-cost-creep-audit.json', 'vendor-negotiation-brief.html']);
+    const audit = JSON.parse(readFileSync(resolve(ready, 'supplier-cost-creep-audit.json'), 'utf8'));
+    expect(audit.custody.periods[1].selectedSheet).toBe(names[0]);
+
+    const held = resolve(scratch, 'cost-creep-csv-worksheet');
+    verifyReceipt('cost-creep', 2, 'blocked', held, ['--period', before, '--period-label', label, '--period-cost-column', '1',
+      '--period-sheet', 'Unexpected', '--period', before, '--period-label', 'Later', '--period-cost-column', '1'],
+    { 'period-1': before, 'period-2': before }, ['supplier-cost-creep-audit.json']);
+    const heldAudit = JSON.parse(readFileSync(resolve(held, 'supplier-cost-creep-audit.json'), 'utf8'));
+    expect(heldAudit.issues).toMatchObject([{ code: 'unexpected-worksheet', periodLabel: label, value: 'Unexpected' }]);
+  }, costCreepTestTimeout);
+});
 
 describe('M19 real CLI subprocess', () => {
   it('publishes exact scoped CAS bytes and holds the same inputs without a location', () => {

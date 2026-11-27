@@ -1,0 +1,98 @@
+.cost-creep { overflow-wrap: anywhere; }
+.creep-demo-note { color: var(--teal-strong); font-weight: 600; }
+.creep-settings {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: 9px 14px;
+  margin-block: 16px;
+}
+.cost-creep :is(.creep-settings, .creep-period-controls, .creep-baseline, .creep-review-controls) label {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  color: var(--ink);
+  font-size: .875rem;
+  font-weight: 650;
+}
+.cost-creep input:not([type="file"]) {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: 38px;
+  padding: 6px 9px;
+  border: 1px solid var(--control-line);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--ink);
+}
+.creep-periods {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  padding: 0;
+}
+.creep-period {
+  min-width: 0;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.creep-period-controls {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  margin-top: 6px;
+}
+.creep-period-controls > label { flex: 1 1 7rem; }
+.creep-period-actions { display: flex; flex-wrap: wrap; gap: 3px 10px; }
+.creep-period-actions .text-button { min-height: 36px; }
+.creep-period-actions .text-button:disabled { color: var(--muted); text-decoration: none; }
+.cost-creep .price-file { border: 0; padding: 0; }
+.cost-creep .price-file .drop-zone { min-height: 78px; padding: 9px; }
+.cost-creep .price-file .price-file-name strong { overflow-wrap: anywhere; }
+.creep-mapping { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 8px; }
+.creep-add-period { margin-top: 9px; }
+.creep-baseline {
+  margin-top: 14px;
+  padding: 8px 14px 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+.creep-baseline summary {
+  min-height: 34px;
+  padding-block: 6px;
+  color: var(--teal-strong);
+  font-weight: 680;
+}
+.creep-baseline > label { max-width: 18rem; margin-top: 9px; }
+.creep-review > h3 { font-size: 1.16rem; }
+.creep-metrics { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.creep-review-controls { display: flex; flex-wrap: wrap; align-items: end; gap: 9px 14px; }
+.creep-review-controls label { flex: 1 1 10rem; }
+.creep-review-controls .price-filters { flex: 2 1 22rem; }
+.creep-review .delta-table-region:focus-visible { outline-offset: -3px; }
+.creep-sparkline { display: block; width: min(100%, 160px); min-width: 58px; height: auto; color: var(--teal); }
+.creep-sparkline polyline { fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linejoin: round; }
+.creep-sparkline circle { fill: currentColor; }
+.creep-sparkline-axis { fill: none; stroke: var(--line); }
+.creep-row-sources { margin-top: 4px; font-size: .78rem; font-weight: 500; color: var(--muted); }
+.creep-row-sources summary { color: var(--teal-strong); }
+.creep-row-sources li { margin-top: 4px; }
+.creep-at-threshold { margin-top: 4px; background: var(--amber-soft); color: var(--amber); }
+
+@media (max-width: 720px) {
+  .creep-periods { grid-template-columns: minmax(0, 1fr); }
+  .creep-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 460px) {
+  .creep-settings { grid-template-columns: minmax(0, 1fr); }
+  .cost-creep .price-file-selection:has(.price-sheet) { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media (max-width: 420px) {
+  .creep-mapping { grid-template-columns: minmax(0, 1fr); }
+}

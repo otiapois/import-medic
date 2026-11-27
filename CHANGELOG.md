@@ -1,5 +1,12 @@
 # Changelog
 
+## v2.0.0 (M20)
+
+- Open **Multi-Period Cost Creep (2–6 sheets)** inside **Supplier Delta** to compare chronological supplier CSV or XLSX pricebooks. Review cumulative cost increases, consecutive hikes, and changes in SKU availability. Add a store retail CSV to compare gross margins where the costs and retail are in the same known currency.
+- Download a cost history CSV, a SHA-256 audit, and a branded Vendor Negotiation Brief with offline SVG trends. The CSV is a supplier review report. Held runs preserve source diagnostics in the audit and withhold the CSV and brief.
+- Run the same comparison with `repair-cli --mode cost-creep`, the eighth explicit CLI mode. The batch manifest fingerprints each original file and each emitted result.
+- Add deterministic fuzz coverage for exact cumulative arithmetic, missing observations, unsafe duplicate SKUs, and hostile report text.
+
 ## v1.9.0 (M19)
 
 - Open **Inventory Sync** in Price Update Studio to compare a Shopify **All states** inventory CSV with one to three supplier stock sheets. Select an exact location and apply a safety reserve, a low-stock zero-out threshold, and an optional cap.

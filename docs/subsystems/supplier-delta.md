@@ -1,6 +1,6 @@
 # Supplier Delta
 
-**Supplier Delta** compares a previous and a new supplier pricebook without a store catalog. Use it to review supplier changes before building a store update. The analysis files are for supplier review. Use **Build Update** with a fresh catalog export to prepare native store update and rollback files.
+The **2-Sheet Delta** view of **Supplier Delta** compares a previous and a new supplier pricebook without a store catalog. Use it to review supplier changes before building a store update. The analysis files are for supplier review. Use **Build Update** with a fresh catalog export to prepare native store update and rollback files. For two to six chronological pricebooks with cumulative cost and SKU lifecycle reporting, choose **Multi-Period Cost Creep (2–6 sheets)**. [Multi-period cost-creep contract](cost-creep.md)
 
 ## Inputs and comparison
 

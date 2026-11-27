@@ -14,6 +14,7 @@ import { readShopify } from '../../../src/core/catalog-migrator/shopify';
 import { readWooCommerceCatalog } from '../../../src/core/catalog-migrator/woocommerce';
 import { createCustodyManifest, dispatchCli, type CliResult } from '../../../src/core/cli/dispatch';
 import { isSafeFileName, isSafeLocalPath } from '../../../src/core/cli/paths';
+import { buildCostCreep } from '../../../src/core/cost-creep/engine';
 import { decodeCsv, parseCsv, serializeCsv } from '../../../src/core/csv';
 import { guardSpreadsheetCell } from '../../../src/core/formula-guard';
 import { buildInventorySync } from '../../../src/core/inventory-sync/engine';
@@ -2029,7 +2030,93 @@ describe('M19 Shopify stock conservation and safety boundaries', () => {
   }, 30_000);
 });
 
-it('accounts for all 35,220 seeded executions without skips', () => {
-  expect(fuzzExecutions).toEqual({ accepted: 35_220, discarded: 0, properties: 61 });
+describe('M20 deterministic cost-creep properties', () => {
+  const file = (index: number, rows: string[][]) => ({
+    label: 'Period ' + (index + 1), filename: 'period-' + (index + 1) + '.csv',
+    bytes: csvBytes(['SKU', 'Cost USD'], rows),
+  });
+  const sku = '00042';
+
+  it('conserves exact cumulative cents and compares 1,250 near-threshold ratios without rounding', async () => {
+    await checkAsyncFuzz(fc.asyncProperty(
+      fc.bigInt({ min: 1n, max: 10n ** 26n }), fc.integer({ min: -140, max: 140 }), fc.nat({ max: 40 }),
+      async (before, offset, thresholdTail) => {
+        const thresholdUnits = BigInt(1000 + thresholdTail);
+        const next = before + before * thresholdUnits / 10_000n + BigInt(offset);
+        const after = next < 0n ? 0n : next;
+        const result = await buildCostCreep([file(0, [[sku, cents(before)]]), file(1, [[sku, cents(after)]])],
+          { creepThresholdPercent: cents(thresholdUnits) });
+        expect(result.status).toBe('ready');
+        const row = result.rows[0];
+        const delta = readAmount(row.cumulativeDelta)!;
+        expect(delta.units * 10n ** BigInt(2 - delta.scale)).toBe(after - before);
+        expect(row.meetsThreshold).toBe((after - before) * 10_000n >= thresholdUnits * before);
+        expect(parseCsv(result.historyCsv!).records[1].cells[0]).toBe(sku);
+      },
+    ), { seed: seed + 61, numRuns: 1_250 });
+  }, 30_000);
+
+  it('replays 750 two-to-six period histories with missing values, exact drops, and broken streaks', async () => {
+    await checkAsyncFuzz(fc.asyncProperty(
+      fc.array(fc.option(fc.integer({ min: 0, max: 30 }), { nil: null }), { minLength: 2, maxLength: 6 }),
+      fc.nat({ max: 30 }),
+      async (generated, keeper) => {
+        const values = generated.map((value, index) => index === keeper % generated.length ? keeper : value);
+        const inputs = values.map((value, index) => file(index, value === null ? [] : [[sku, value.toString()]]));
+        const result = await buildCostCreep(inputs);
+        expect(result.status).toBe('ready');
+        const [row] = result.rows;
+        const observed = values.filter((value) => value !== null);
+        const first = values.findIndex((value) => value !== null);
+        const edges = values.slice(1).map((after, index) => {
+          const before = values[index];
+          if (before === null || after === null || before === after) return '.';
+          return before < after ? '+' : '-';
+        }).join('');
+        const lifecycle = values.at(-1) === null ? 'discontinued' :
+          values.slice(first).includes(null) ? 'reappeared' : first > 0 ? 'added-later' : 'active-all-periods';
+        expect(row).toMatchObject({ lifecycle, firstObservedCost: String(observed[0]), latestObservedCost: String(observed.at(-1)),
+          cumulativeDelta: String(observed.at(-1)! - observed[0]), volatility: String(Math.max(...observed) - Math.min(...observed)),
+          hikeCount: (edges.match(/\+/g) ?? []).length, dropCount: (edges.match(/-/g) ?? []).length,
+          consecutiveHikes: Math.max(0, ...(edges.match(/\++/g) ?? []).map((run) => run.length)),
+        });
+        expect(row.observations.map((observation) => observation ? Number(observation.cost) : null)).toEqual(values);
+        if (observed.length === 1 || observed[0] === 0) expect(row.cumulativeDeltaPercent).toBeNull();
+      },
+    ), { seed: seed + 62, numRuns: 750 });
+  }, 30_000);
+
+  it('replays 500 hostile briefs and holds conflicting duplicates at their multiline source lines', async () => {
+    const hostile = fc.constantFrom('"><img src=https://evil.invalid/a onerror=alert(1)>',
+      '=HYPERLINK("http://evil.invalid/")', '=<script src=//evil.invalid/app></script>',
+      '<svg/onload=alert(1)> javascript:alert(1)', '<iframe src=ftp://evil.invalid/a>');
+    await checkAsyncFuzz(fc.asyncProperty(
+      hostile, fc.nat({ max: 99_999 }), fc.integer({ min: 1, max: 7 }), fc.constantFrom('\r\n', '\n', '\r'),
+      async (payload, suffix, embedded, ending) => {
+        const key = payload + suffix;
+        const initial = { ...file(0, [[key, '10']]), label: payload + ' before' };
+        const later = { ...file(1, [[key, '12']]), label: payload + ' after' };
+        const branding = { agencyName: payload, preparedFor: 'Buyer', contactNote: payload, accentKey: 'slate' as const };
+        const ready = await buildCostCreep([initial, later], { branding });
+        expect(ready.status).toBe('ready');
+        expect(ready.briefHtml).toContain("script-src 'none'");
+        expect(ready.briefHtml?.match(/<(?:script|img|iframe)\b|\b(?:https?|ftp|javascript):|\/\//i)).toBeNull();
+        expect(parseCsv(ready.historyCsv!).records[1].cells[0]).toBe(guardSpreadsheetCell(key));
+        expect(ready.rows[0].sku).toBe(key);
+        const note = Array.from({ length: embedded + 1 }, (_, index) => 'note' + index).join(ending);
+        const conflict = { ...later, bytes: bytes(serializeCsv(['SKU', 'Cost USD', 'Note'],
+          [[key, '12', note], [key, '13', 'Different']], 'cost-creep')) };
+        const held = await buildCostCreep([initial, conflict], { branding });
+        expect(held).toMatchObject({ status: 'blocked', historyCsv: null, briefHtml: null,
+          issues: [{ code: 'conflicting-duplicate-sku', periodLabel: later.label, row: 2, rows: [2, embedded + 3], sku: key }] });
+        expect(held.custody.historyCsvSha256).toBeUndefined();
+        expect(held.custody.briefHtmlSha256).toBeUndefined();
+      },
+    ), { seed: seed + 63, numRuns: 500 });
+  }, 30_000);
+});
+
+it('accounts for all 37,720 seeded executions without skips', () => {
+  expect(fuzzExecutions).toEqual({ accepted: 37_720, discarded: 0, properties: 64 });
   console.info(`Deterministic fuzz: ${fuzzExecutions.accepted} accepted, ${fuzzExecutions.discarded} discarded across ${fuzzExecutions.properties} properties.`);
 });

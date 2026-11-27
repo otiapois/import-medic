@@ -8,6 +8,7 @@ import { isSafeFileName, isSafeLocalPath } from '../src/core/cli/paths';
 import { PLATFORM_IDS, repairCsvWithBytes } from '../src/core/index';
 import { hasDuplicateKeys, profileText } from '../src/core/shopify-price-diff/settings-validation';
 import { conflictPolicies } from '../src/core/shopify-price-diff/types';
+import { parseWorkspaceProfile } from '../src/core/shopify-price-diff/workspace-profile';
 
 const usage = `Usage: npm run repair-cli -- --platform <${PLATFORM_IDS.join('|')}> <input.csv>
   --output <repaired.csv>              Write CSV to a new file (default: stdout)
@@ -83,6 +84,8 @@ async function legacyMain() {
 const repairFlags = ['date-order', 'qbo-layout', 'qbo-credit-debit', 'stripe-paypal-output', 'stripe-paypal-fee-convention', 'exclude-paypal-memo', 'formula-guard'];
 const supplierFlags = ['supplier', 'sheet', 'sheet-b64', 'recipe', 'label', 'label-b64'];
 const inventorySupplierFlags = ['supplier', 'sheet', 'sheet-b64', 'sku-column', 'sku-column-b64', 'quantity-column', 'quantity-column-b64'];
+const periodFlags = ['period', ...['period-label', 'period-sheet', 'period-sku-column', 'period-cost-column']
+  .flatMap((name) => [name, name + '-b64'])];
 const checks = ['mapping', 'currency', 'fx'] as const;
 const deltaSides = ['previous', 'next'] as const;
 const deltaFields = { skuColumn: 'sku', costColumn: 'cost', inventoryColumn: 'inventory' } as const;
@@ -100,12 +103,15 @@ const modeFlags = {
   'supplier-delta': deltaFlags,
   'inventory-sync': ['baseline', ...inventorySupplierFlags, 'target-location', 'target-location-b64', 'reserve-units',
     'zero-out-threshold', 'max-cap', 'approve-large-drop'],
+  'cost-creep': [...periodFlags, 'creep-threshold-percent', 'currency', 'baseline', 'baseline-currency',
+    'baseline-sku-column', 'baseline-sku-column-b64', 'baseline-retail-column', 'baseline-retail-column-b64', 'workspace-profile'],
   migrate: ['source-platform', 'target-platform'],
 };
 const booleanFlags = new Set(['help', 'exclude-paypal-memo', 'formula-guard', ...checks.map(check => `confirm-${check}`),
   'confirm-conflict-policy', 'preserve-higher-compare-at', 'cost-check', 'approve-large-drop']);
 const sharedFlags = ['mode', 'help', 'out-dir'];
-const repeatable = new Set([...supplierFlags, ...inventorySupplierFlags, ...checks.map(check => `confirm-${check}-supplier`), 'sku', 'sku-b64', 'skip-line']);
+const repeatable = new Set([...supplierFlags, ...inventorySupplierFlags, ...periodFlags,
+  ...checks.map(check => `confirm-${check}-supplier`), 'sku', 'sku-b64', 'skip-line']);
 const allOptions = Object.fromEntries([...new Set([...sharedFlags, ...Object.values(modeFlags).flat()])].map(name =>
   [name, { type: booleanFlags.has(name) ? 'boolean' as const : 'string' as const, ...(name === 'help' ? { short: 'h' } : {}) }]));
 
@@ -116,6 +122,7 @@ const modeUsage = {
   promo: '--platform <store> --baseline <csv> --discount-mode <percent-off|fixed-amount-off> --discount-amount <decimal> --minimum-retail <decimal> [--cost-sheet <csv|xlsx>]',
   'supplier-delta': '--previous <csv|xlsx> --next <csv|xlsx> [--previous-sheet <name>] [--next-sheet <name>]',
   'inventory-sync': '--baseline <csv> --supplier <csv|xlsx> [--sheet <name>] --sku-column <header|1-based position> --quantity-column <header|1-based position> … [--target-location <name>]',
+  'cost-creep': '--period <csv|xlsx> --period-label <label> [--period-sheet <name>] [--period-sku-column <header>] [--period-cost-column <header>] … [--baseline <csv>]',
   migrate: '--source-platform <store> --target-platform <store> <input.csv>',
 };
 
@@ -239,19 +246,22 @@ async function explicitMain(args: string[]) {
     return encoded === undefined ? raw : decodeName(encoded);
   };
   const repeated = (name: string) => tokens.flatMap(token => token.kind === 'option' && token.name === name ? [token.value!] : []);
-  const supplierGroups = (flags: string[]) => {
+  const groupedInputs = (fileFlag: 'supplier' | 'period', flags: string[]) => {
+    const [minimum, maximum] = fileFlag === 'period' ? [2, 6] : [1, 3];
     const groups: Array<Record<string, { value: string; encoded: boolean }>> = [];
     for (const token of tokens) {
       if (token.kind !== 'option' || !flags.includes(token.name)) continue;
       const { name, value } = token;
-      if (name === 'supplier') { groups.push({ supplier: { value: value!, encoded: false } }); continue; }
+      if (name === fileFlag) { groups.push({ [fileFlag]: { value: value!, encoded: false } }); continue; }
       const group = groups.at(-1);
       const field = name.replace(/-b64$/, '');
-      if (!group || group[field] !== undefined) throw new Error(`Place one --${field} after the relevant --supplier.`);
+      if (!group || group[field] !== undefined) throw new Error(`Place one --${field} after the relevant --${fileFlag}.`);
       const encoded = name.endsWith('-b64');
       group[field] = { value: encoded ? decodeName(value!) : value!, encoded };
     }
-    if (groups.length < 1 || groups.length > 3) throw new Error('Provide one to three --supplier inputs.');
+    if (groups.length < minimum || groups.length > maximum) {
+      throw new Error(fileFlag === 'period' ? 'Provide two to six --period inputs.' : 'Provide one to three --supplier inputs.');
+    }
     return groups;
   };
   const outDir = localPath(required('out-dir'));
@@ -284,7 +294,7 @@ async function explicitMain(args: string[]) {
     }
     case 'price-diff': {
       const platform = store('platform');
-      const groups = supplierGroups(supplierFlags);
+      const groups = groupedInputs('supplier', supplierFlags);
       const supplierNumber = (value: string) => {
         const index = number(value);
         if (index > groups.length) throw new Error('Choose an available supplier by its 1-based command order.');
@@ -354,7 +364,7 @@ async function explicitMain(args: string[]) {
       break;
     }
     case 'inventory-sync': {
-      const groups = supplierGroups(inventorySupplierFlags);
+      const groups = groupedInputs('supplier', inventorySupplierFlags);
       const baseline = source('baseline');
       const suppliers = groups.map((group, index): CliInventorySupplier => {
         const column = (optionName: string) => {
@@ -377,6 +387,30 @@ async function explicitMain(args: string[]) {
         zeroOutThreshold: wholeNumber('zero-out-threshold') ?? 0,
         maxCap: wholeNumber('max-cap'),
         approveLargeDrop: flag('approve-large-drop'),
+      } };
+      break;
+    }
+    case 'cost-creep': {
+      const periods = groupedInputs('period', periodFlags).map((group, index) => {
+        const label = group['period-label']?.value;
+        if (label === undefined) throw new Error('Provide --period-label for period ' + (index + 1) + '.');
+        return { ...read('period-' + (index + 1), group.period.value, /\.(?:csv|xlsx)$/i), label,
+          sheetName: group['period-sheet']?.value,
+          mapping: { skuColumn: group['period-sku-column']?.value, amountColumn: group['period-cost-column']?.value } };
+      });
+      const baseline = optional('baseline');
+      const baselineCurrency = option('baseline-currency');
+      const baselineSku = named('baseline-sku-column');
+      const baselineRetail = named('baseline-retail-column');
+      if (!baseline && [baselineCurrency, baselineSku, baselineRetail].some((value) => value !== undefined)) {
+        throw new Error('Baseline column and currency options require --baseline.');
+      }
+      const profilePath = option('workspace-profile');
+      const profile = profilePath === undefined ? undefined : parseWorkspaceProfile(read('workspace-profile', profilePath, /\.json$/i).bytes);
+      if (profile && !profile.ok) throw new Error(profile.diagnostics.map(({ message }) => message).join('\n'));
+      request = { mode, periods, options: {
+        creepThresholdPercent: option('creep-threshold-percent'), currency: option('currency'), branding: profile?.value.branding,
+        retail: baseline ? { ...baseline, currency: baselineCurrency, mapping: { skuColumn: baselineSku, amountColumn: baselineRetail } } : undefined,
       } };
       break;
     }
