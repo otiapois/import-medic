@@ -31,6 +31,8 @@ import { inspectImport } from '../../../src/core/verify-import/inspector';
 import { brandSupplierDeltaReports, buildSupplierDelta } from '../../../src/core/supplier-delta/engine';
 import { runPriceComparison, simulatePriceScenarios, type PriceComparison, type WhatIfScenario } from '../../../src/core/whatif/simulator';
 import { listWorkbookSheets } from '../../../src/core/xlsx';
+import { parseBom, rollupBom, type BomCost } from '../../../src/core/bom/rollup';
+import { syntheticBomBaseline } from './bom-fixtures';
 
 
 const fuzzExecutions = { accepted: 0, discarded: 0, properties: 0 };
@@ -1707,7 +1709,118 @@ describe('M16 agency branding and native price replay', () => {
   }, 60_000);
 });
 
-it('accounts for all 27,720 seeded executions without skips', () => {
-  expect(fuzzExecutions).toEqual({ accepted: 27_720, discarded: 0, properties: 47 });
+describe('M17 bundle DAG, cycle, orphan and native byte replay', () => {
+  const bomBytes = (entries: string[][]) => bytes(serializeCsv(['Bundle SKU', 'Component SKU', 'Quantity', 'Assembly Cost'], entries, 'price-audit'));
+  const bomRead = (entries: string[][]) => parseBom(bomBytes(entries), 'bundles.csv');
+  const priced = (value: bigint): BomCost => ({ cents: value, source: { kind: 'baseline', filename: 'store.csv', line: 2, column: 'Cost' } });
+  const qty = fc.integer({ min: 1, max: 9 });
+
+  it('conserves every nested cost across 900 independent five-level DAGs', () => {
+    checkFuzz(fc.property(
+      fc.array(fc.tuple(fc.bigInt({ min: 0n, max: 2n ** 60n }), fc.bigInt({ min: 0n, max: 500n }), qty, qty, fc.nat(99)), { minLength: 1, maxLength: 5 }),
+      (inputs) => {
+        const expected = new Map<string, bigint>();
+        const depths = new Map<string, number>();
+        const leaves = new Map<string, BomCost>();
+        const entries: string[][] = [];
+        for (const [index, [leafUnits, assembly, leafCount, bundleCount, prior]] of inputs.entries()) {
+          const sku = 'B-' + index;
+          const leaf = '00123' + index;
+          leaves.set(leaf, priced(leafUnits));
+          entries.push([sku, leaf, String(leafCount), cents(assembly)]);
+          let sum = assembly + leafUnits * BigInt(leafCount);
+          let depth = 1;
+          if (index > 0) {
+            const parent = 'B-' + prior % index;
+            entries.push([sku, parent, String(bundleCount), cents(assembly)]);
+            sum += BigInt(bundleCount) * expected.get(parent)!;
+            depth = depths.get(parent)! + 1;
+          }
+          expected.set(sku, sum);
+          depths.set(sku, depth);
+        }
+        const result = rollupBom(bomRead(entries.reverse()), (sku) => ({ current: leaves.get(sku) ?? null, previous: leaves.get(sku) ?? null }));
+        expect(result.issues).toEqual([]);
+        expect(result.kits).toHaveLength(inputs.length);
+        for (const kit of result.kits) {
+          expect(kit).toMatchObject({ newCost: cents(expected.get(kit.sku)!), oldCost: cents(expected.get(kit.sku)!),
+            oldCostSource: 'recomputed', depth: depths.get(kit.sku) });
+        }
+      },
+    ), { seed: seed + 47, numRuns: 900 });
+  });
+
+  it('reports 350 exact cycle paths and physical source lines', () => {
+    checkFuzz(fc.property(
+      fc.integer({ min: 1, max: 12 }), fc.integer({ min: 0, max: 8 }), qty,
+      (length, blank, count) => {
+        const chain = Array.from({ length }, (_, index) => 'KIT-' + index);
+        const source = chain.map((sku, index) => sku + ',' + chain[(index + 1) % length] + ',' + count).join('\n');
+        const parsed = parseBom(bytes('Bundle SKU,Component SKU,Quantity\n' + '\n'.repeat(blank) + source), 'cycle.csv');
+        const result = rollupBom(parsed, () => ({ current: null, previous: null }));
+        expect(result.issues).toMatchObject([{ code: 'bom-cycle', bomPath: [...chain, chain[0]],
+          rows: chain.map((_, index) => blank + index + 2) }]);
+        expect(result.kits.every(({ newCost }) => newCost === null)).toBe(true);
+      },
+    ), { seed: seed + 48, numRuns: 350 });
+  });
+
+  it('holds 350 orphan and unknown-price cases without replacing them with explicit zero', () => {
+    checkFuzz(fc.property(
+      fc.bigInt({ min: 0n, max: 50_000n }), qty, qty, fc.nat(1_000_000),
+      (baselineCost, count, kitCount, suffix) => {
+        const orphan = '00-' + suffix;
+        const result = rollupBom(bomRead([['B-2', 'B-1', String(kitCount), '0.10'],
+          ['B-1', '0000', String(count), '0.00'], ['B-1', orphan, '1', '0.000']]),
+        (sku) => ({ current: sku === '0000' ? priced(baselineCost) : null, previous: null }));
+        expect(result.issues).toMatchObject([{ code: 'orphan-component', row: 4, value: orphan }]);
+        expect(result.kits).toMatchObject([{ newCost: null }, { newCost: null, components: [{ unitCost: cents(baselineCost) }, { unitCost: null }] }]);
+      },
+    ), { seed: seed + 49, numRuns: 350 });
+  });
+
+  for (const [index, platform] of (['shopify', 'woocommerce', 'bigcommerce'] as const).entries()) {
+    it('replays 300 matching ' + platform + ' native update and rollback byte pairs', async () => {
+      await checkAsyncFuzz(fc.asyncProperty(
+        fc.bigInt({ min: 500n, max: 50000n }), fc.bigInt({ min: 1n, max: 250n }), fc.bigInt({ min: 0n, max: 10000n }),
+        fc.bigInt({ min: 0n, max: 1000n }), qty, qty, qty,
+        async (beforeLeaf, increase, fallback, assembly, leafCount, kitCount, fallbackCount) => {
+          const first = (leaf: bigint) => BigInt(leafCount) * leaf + assembly;
+          const second = (leaf: bigint) => BigInt(kitCount) * first(leaf) + BigInt(fallbackCount) * fallback + assembly;
+          const baselineLeaf = cents(beforeLeaf * 2n) + '0';
+          const baselineFirst = cents(first(beforeLeaf) * 2n) + '00';
+          const baselineSecond = cents(second(beforeLeaf) * 2n) + '000';
+          const { baseline, data } = syntheticBomBaseline(platform, [
+            ['00123', baselineLeaf, cents(beforeLeaf)], ['00004', '200.000', cents(fallback)],
+            ['KIT-A', baselineFirst, ''], ['KIT-B', baselineSecond, ''],
+          ]);
+          const after = beforeLeaf + increase;
+          const [supplier] = parseSupplier(bytes('SKU,Cost\n00123,' + cents(after)), 'offer.csv').sheets;
+          const sheet = bomRead([['KIT-B', 'KIT-A', String(kitCount), cents(assembly)],
+            ['KIT-B', '00004', String(fallbackCount), ''], ['KIT-A', '00123', String(leafCount), cents(assembly)]]);
+          const result = buildPriceDiff(baseline, supplier, { confirmed: true, pricingRule: { mode: 'multiplier', multiplier: '2' } },
+            {}, undefined, undefined, undefined, { sheet });
+          expect(result.issues).toEqual([]);
+          expect(result.bom?.kits).toMatchObject([
+            { sku: 'KIT-B', newCost: cents(second(after)), oldCost: cents(second(beforeLeaf)), grossMarginPercent: '50.00' },
+            { sku: 'KIT-A', newCost: cents(first(after)), oldCost: cents(first(beforeLeaf)), grossMarginPercent: '50.00' },
+          ]);
+          expect(result.canDownload).toBe(true);
+          const { updateBytes, rollbackBytes } = result;
+          expect(parseCsv(decodeCsv(updateBytes!).text).records.slice(1).map(({ cells }) => cells.at(-1)))
+            .toEqual([cents(after * 2n), cents(first(after) * 2n), cents(second(after) * 2n)]);
+          expect(parseCsv(decodeCsv(rollbackBytes!).text).records.slice(1).map(({ cells }) => cells.at(-1)))
+            .toEqual([baselineLeaf, baselineFirst, baselineSecond]);
+          const inspected = await inspectImport(platform, data, rollbackBytes!, updateBytes!);
+          expect(inspected).toMatchObject({ verdict: 'PASS', nonTargetMutations: 0, brokenGroups: 0,
+            rollback: { scope: 'paired-update', residualDiffs: 0, restored: true } });
+        },
+      ), { seed: seed + 50 + index, numRuns: 300 });
+    });
+  }
+});
+
+it('accounts for all 30,220 seeded executions without skips', () => {
+  expect(fuzzExecutions).toEqual({ accepted: 30_220, discarded: 0, properties: 53 });
   console.info(`Deterministic fuzz: ${fuzzExecutions.accepted} accepted, ${fuzzExecutions.discarded} discarded across ${fuzzExecutions.properties} properties.`);
 });

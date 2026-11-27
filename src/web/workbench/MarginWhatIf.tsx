@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import type { WhatIfResult, WhatIfScenario } from '../../core/whatif/simulator';
+import { formatMarginPercent } from './priceDisplay';
 
 const CURRENT = { id: 'current', label: 'Current Rule' };
 const QUICK = [
@@ -131,7 +132,9 @@ export default function MarginWhatIf({ compare, busy, onApply }: {
               ) : null}
               {result && result.status !== 'invalid' ? (
                 <dl className="what-if-metrics">
-                  <div><dt>Avg Margin %</dt><dd>{result.averageMarginPercent === null ? 'Unknown' : `${result.averageMarginPercent}%`}</dd></div>
+                  <div><dt>Avg Margin %</dt><dd title={result.averageMarginPercent === null ? undefined : `${result.averageMarginPercent}%`}>
+                    {formatMarginPercent(result.averageMarginPercent)}
+                  </dd></div>
                   <div><dt>Negative Margin SKUs</dt><dd>{numberFormat.format(result.negativeMarginSkuCount)}</dd></div>
                   <div><dt>Total Retail Impact</dt><dd data-retail-delta-cents={result.totalRetailDeltaCents ?? undefined}>{formatRetailDelta(result.totalRetailDeltaCents)}</dd></div>
                   <div><dt>Changed SKUs</dt><dd>{numberFormat.format(result.changedSkuCount)}</dd></div>

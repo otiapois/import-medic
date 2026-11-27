@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { BomInputs } from '../bom/rollup';
 import { compareFractions, grossMarginFraction, meanPercent } from '../analytics/catalog-impact';
 import { buildMultiSupplierDiff, buildPriceDiff } from '../shopify-price-diff';
 import { minimumRetailSchema, pricingRuleSchema, retailAdjustmentSchema, retailRoundingSchema, validatePricingRule } from '../shopify-price-diff/pricing-rules';
@@ -17,9 +18,10 @@ const scenarioSchema = z.strictObject({
 });
 
 export type WhatIfScenario = z.infer<typeof scenarioSchema>;
-export type PriceComparison =
+export type PriceComparison = { bom?: BomInputs } & (
   | { kind: 'single'; supplier: SupplierDiffInput }
-  | { kind: 'batch'; suppliers: readonly SupplierDiffInput[]; options: BatchDiffOptions };
+  | { kind: 'batch'; suppliers: readonly SupplierDiffInput[]; options: BatchDiffOptions }
+);
 
 export interface WhatIfResult {
   id: string;
@@ -41,9 +43,9 @@ type Work = (phase: 'comparing' | 'exporting', percent: number) => void;
 
 /** The active comparison and its scenarios both enter the native builders here. */
 export function runPriceComparison(baseline: Baseline, comparison: PriceComparison, work?: Work): PriceDiffResult {
-  if (comparison.kind === 'batch') return buildMultiSupplierDiff(baseline, comparison.suppliers, comparison.options, undefined, work);
+  if (comparison.kind === 'batch') return buildMultiSupplierDiff(baseline, comparison.suppliers, comparison.options, undefined, work, comparison.bom);
   const { supplier } = comparison;
-  return buildPriceDiff(baseline, supplier.sheet, supplier.selection, supplier.resolutions, undefined, supplier, work);
+  return buildPriceDiff(baseline, supplier.sheet, supplier.selection, supplier.resolutions, undefined, supplier, work, comparison.bom);
 }
 
 function decimal(units: bigint, scale: number): string {
@@ -120,7 +122,7 @@ function summarize(result: PriceDiffResult, suppliers: WhatIfResult['suppliers']
       else delta += afterCents - beforeCents;
     }
     if (!after) continue;
-    const floor = floors.get(row.supplierId ?? 'primary');
+    const floor = floors.get(row.bomPricingSupplierId ?? row.supplierId ?? 'primary');
     if (floor && amountGreaterThan(floor, after)) subFloorSkuCount++;
     if (!row.landedCost) continue;
     const margin = grossMarginFraction(row.landedCost, after);
@@ -173,7 +175,7 @@ export function simulatePriceScenarios(
     }
     const suppliers = adjusted.map(({ supplierId, selection }) => ({ supplierId, pricingRule: selection?.pricingRule }));
     const result = !changed && current ? current : runPriceComparison(baseline, comparison.kind === 'batch'
-      ? { ...comparison, suppliers: adjusted } : { kind: 'single', supplier: adjusted[0] });
+      ? { ...comparison, suppliers: adjusted } : { ...comparison, supplier: adjusted[0] });
     const blocking = result.issues.find(({ blocking }) => blocking);
     return {
       id: input.id, status: result.status, canApply: changed && result.canDownload, suppliers,

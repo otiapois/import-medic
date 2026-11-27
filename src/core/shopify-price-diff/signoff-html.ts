@@ -5,6 +5,7 @@ import type { Baseline, DiffIssue, DiffRow, PriceDiffResult } from './types';
 import type { PricingRule } from './pricing-rules';
 import { createCatalogImpact, type CatalogImpactSummary } from '../analytics/catalog-impact';
 import type { PriceCustody } from '../audit/custody';
+import type { BomCostSource, BomRollup } from '../bom/rollup';
 import { custodyFooter, escapeReportText as escape, offlineReportCsp } from '../report-html';
 
 const rowLimit = 500;
@@ -83,9 +84,30 @@ ${watchlist.length ? `<table><thead><tr><th scope="col">SKU / handle</th><th sco
 </section>`;
 }
 
+function bomSection(bom: BomRollup): string {
+  const source = (evidence: BomCostSource | null) => evidence
+    ? escape(evidence.kind === 'supplier' ? 'Supplier cost' : evidence.kind === 'bundle' ? 'Bundle rollup' : 'Baseline cost')
+      + ' · ' + sourceLocation(evidence.filename, evidence.worksheet, evidence.line) + ' · ' + escape(evidence.column)
+      + (evidence.fx ? ' · ' + escape(evidence.fx.sourceCurrency + ' → ' + evidence.fx.storeCurrency + ' × ' + evidence.fx.fxRate) : '')
+    : '—';
+  return `<section><h2>Bundle Cost Rollup</h2>
+<p>${escape(bom.filename)}${bom.worksheet ? ' · Worksheet: ' + escape(bom.worksheet) : ''} · ${escape(bom.currency ?? 'Store currency')}</p>
+${bom.issues.length ? `<ul>${bom.issues.map(({ message, rows }) => `<li>${escape(message)}${rows.length ? ' · BOM lines ' + rows.join(', ') : ''}</li>`).join('')}</ul>` : ''}
+${bom.kits.map(kit => `<h3>${escape(kit.sku)}</h3><p>BOM lines ${kit.lines.join(', ')}${kit.baselineLine === null ? '' : ' · Baseline line ' + kit.baselineLine} · Bundle depth ${kit.depth}</p>
+<p>Previous cost ${cell(kit.oldCost)}${kit.oldCostSource === 'recomputed' ? ' (recomputed)' : ''} · New cost ${cell(kit.newCost)} · Projected retail ${cell(kit.newRetail)} · Projected margin ${kit.grossMarginPercent === null ? '—' : escape(kit.grossMarginPercent) + '%'}</p>
+${kit.oldCostEvidence ? `<p>Previous cost evidence · ${source(kit.oldCostEvidence)}</p>` : ''}
+<p>Assembly cost ${cell(kit.assemblyCost)}${kit.assemblyLine === null ? '' : ' · BOM line ' + kit.assemblyLine}${kit.pricingSupplierId === undefined ? '' : ' · Pricing rule: ' + escape(bom.pricingSuppliers?.find(({ supplierId }) => supplierId === kit.pricingSupplierId)?.label ?? kit.pricingSupplierId)}</p>
+<table><caption>Components for ${escape(kit.sku)}</caption><thead><tr>
+<th scope="col">SKU · BOM line</th><th scope="col">Quantity</th><th scope="col">Prior unit cost</th><th scope="col">Unit cost</th><th scope="col">Extended cost</th><th scope="col">Cost evidence</th>
+</tr></thead><tbody>${kit.components.map(component => `<tr><td>${escape(component.sku)} · ${component.line}</td><td>${escape(component.quantity)}</td>
+<td>${cell(component.previousUnitCost)}</td><td>${cell(component.unitCost)}</td><td>${cell(component.extendedCost)}</td><td>${source(component.source)}${component.previousSource ? `<small>Previous: ${source(component.previousSource)}</small>` : ''}</td></tr>`).join('')}
+</tbody></table>`).join('')}
+</section>`;
+}
+
 export function createSignoffHtml(
   baseline: Baseline, result: Pick<PriceDiffResult, 'rows' | 'canDownload' | 'rollbackVerification'> &
-    Partial<Pick<PriceDiffResult, 'supplierPricing' | 'conflictCount' | 'conflictPolicy' | 'inventoryEnabled' | 'issues' | 'market'>>,
+    Partial<Pick<PriceDiffResult, 'supplierPricing' | 'conflictCount' | 'conflictPolicy' | 'inventoryEnabled' | 'issues' | 'market' | 'bom'>>,
   rule?: PricingRule, cached?: CachedImpact, custody?: PriceCustody, branding?: SignoffBrand,
 ): string {
   const woo = baseline.platform === 'woocommerce';
@@ -179,7 +201,7 @@ small,.supplier-detail{display:block}
 <dl class="summary">${metrics.map(([label, value]) => `<div><dt>${label}</dt><dd>${escape(value)}</dd></div>`).join('')}</dl>
 <p>The average covers updated ${bigcommerce ? 'products and SKUs' : woo ? 'products and variations' : 'variants'} with a comparable baseline price.</p>
 ${bigcommerce ? '<p>Use the legacy product import with Overwrite existing products and Ignore blank values enabled. Match only the included columns. If BigCommerce requires category assignment for this file, stop before importing.</p>' : ''}
-${analyticsSection(result.rows, result.inventoryEnabled === true, productPricing, result.issues, cached)}
+${analyticsSection(result.rows, result.inventoryEnabled === true, productPricing, result.issues, cached)}${result.bom ? '\n' + bomSection(result.bom) : ''}
 ${total > rowLimit ? `<p>Showing ${rowLimit} of ${total} updated or flagged rows, with flagged rows first. See the full diff audit for the remaining ${total - rowLimit}.</p>` : ''}
 ${rows.length ? `<table><caption>Updated and flagged rows</caption><thead><tr>
 <th scope="col">SKU</th><th scope="col">${productPricing ? 'ID' : 'Handle'}</th><th scope="col">${productPricing ? 'Type / Parent' : 'Options'}</th><th scope="col">Old Price</th><th scope="col">New Price</th><th scope="col">Delta %</th><th scope="col">${productPricing ? 'Sale Price' : 'Compare-At'}</th>${result.inventoryEnabled ? `<th scope="col">${productPricing ? 'Stock' : 'Inventory Qty'}</th>` : ''}${showSources ? '<th scope="col">Supplier source</th>' : ''}${showTiers ? '<th scope="col">Matched Tier</th>' : ''}<th scope="col">Status</th>
@@ -188,6 +210,7 @@ ${custody ? custodyFooter([
     ['Baseline CSV', custody.baselineSha256],
     ...custody.suppliers.map(({ filename, bytes, sha256, selectedSheet }) =>
       [`Supplier ${filename} (${bytes} bytes)${selectedSheet === undefined ? '' : ` · Worksheet: ${selectedSheet}`}`, sha256] as const),
+    ...(custody.bom ? [[`Bundle BOM ${custody.bom.filename} (${custody.bom.bytes} bytes)${custody.bom.worksheet ? ` · Worksheet: ${custody.bom.worksheet}` : ''}`, custody.bom.sha256] as const] : []),
     ['Update CSV', custody.updateCsvSha256],
     ['Rollback CSV', custody.rollbackCsvSha256],
   ]) : ''}

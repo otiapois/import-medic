@@ -3,6 +3,7 @@ import type { RecipeResult, SupplierRecipe } from '../shopify-price-diff/recipe'
 import type { ManualCellEdit, PlatformId, PreviewRow, RemovedRow, RepairIssue, RepairOptions, RepairResult } from '../types';
 import type { CatalogImpactSummary } from '../analytics/catalog-impact';
 import type { PriceCustody, RepairCustody } from '../audit/custody';
+import type { BomRollup } from '../bom/rollup';
 import type { ImportDiffRow, ImportInspection, ImportInspectionIssue } from '../verify-import/inspector';
 import type { ShopifyMarket } from '../shopify-price-diff/markets';
 import type { SignoffBrand } from '../branding/signoff-brand';
@@ -31,11 +32,13 @@ interface SourceMeta { name: string; issues: DiffIssue[]; issueCount: number }
 export interface SheetMeta extends SourceMeta { headers: string[]; rowCount: number }
 export interface BaselineMeta extends SheetMeta { hasSku: boolean; markets?: ShopifyMarket[] }
 export interface SupplierMeta extends SourceMeta { sheets: SheetMeta[]; sheetNames?: string[]; selectedSheet?: string }
+export interface BomMeta extends SourceMeta { worksheet?: string; rowCount: number }
 
 export type DiffFilter = 'all' | 'updated' | 'flagged' | 'unmatched' | 'unchanged' | 'skipped' | 'margin-watchlist';
 export type PricePreviewRow = DiffRow & { variantOptions: string; grossMarginPercent?: string | null };
 export interface DiffSummary extends Pick<PriceDiffResult, 'status' | 'canDownload' | 'verification' | 'rollbackVerification' | 'inventoryEnabled' | 'overlapCount' | 'conflictCount' | 'conflictPolicy' | 'market'> {
   custody: PriceCustody;
+  bom?: BomRollup;
   formulaGuard: GuardSummary;
   counts: Record<DiffFilter, number>;
   analytics: CatalogImpactSummary;
@@ -75,11 +78,13 @@ interface Operations {
   loadBaseline: [{ file: File; platform?: StorePlatform }, BaselineMeta];
   loadSupplier: [{ file: File; supplierId?: string; sheetName?: string; firstVisibleSheet?: true }, SupplierMeta];
   removeSupplier: [{ supplierId: string }, undefined];
+  loadBom: [{ file: File }, BomMeta];
+  removeBom: [Record<never, never>, undefined];
   priceSettings: [SupplierWorksheet, ColumnSuggestions];
   priceFormulaPreview: [SupplierWorksheet & { selection: ColumnSelection; market?: string }, PricingPreview | null];
   invalidatePrice: [Record<never, never>, undefined];
-  diff: [SupplierWorksheet & DiffSettings & { label?: string; market?: string }, DiffSummary];
-  diffBatch: [BatchDiffOptions & { suppliers: readonly SupplierBatchSetting[] }, DiffSummary];
+  diff: [SupplierWorksheet & DiffSettings & { label?: string; market?: string; bomPricingSupplierId?: string }, DiffSummary];
+  diffBatch: [BatchDiffOptions & { suppliers: readonly SupplierBatchSetting[]; bomPricingSupplierId?: string }, DiffSummary];
   simulatePrice: [{ scenarios: readonly WhatIfScenario[] }, WhatIfResult[]];
   diffRows: [PageRequest & { filter: DiffFilter; search: string }, WorkerPage<PricePreviewRow>];
   diffIssues: [PageRequest, WorkerPage<DiffIssue>];
@@ -103,7 +108,7 @@ export type ResultScope = 'price' | 'repair' | 'inspection';
 
 export function invalidatesResult(request: WorkerRequest): ResultScope | undefined {
   switch (request.type) {
-    case 'loadBaseline': case 'loadSupplier': case 'removeSupplier': case 'applyRecipe': case 'invalidatePrice': case 'diff': case 'diffBatch': return 'price';
+    case 'loadBaseline': case 'loadSupplier': case 'removeSupplier': case 'loadBom': case 'removeBom': case 'applyRecipe': case 'invalidatePrice': case 'diff': case 'diffBatch': return 'price';
     case 'loadRepair': case 'repair': return 'repair';
     case 'inspectImport': return 'inspection';
   }

@@ -1,6 +1,7 @@
 import { repairCsvWithBytes } from '..';
 import { createCatalogImpact, type CatalogMarginRow } from '../analytics/catalog-impact';
-import { sha256, type PriceCustody, type RepairCustody, type SupplierFingerprint } from '../audit/custody';
+import { sha256, type BomFingerprint, type PriceCustody, type RepairCustody, type SupplierFingerprint } from '../audit/custody';
+import { parseBom, type BomSheet } from '../bom/rollup';
 import { decodeCsv, parseCsv } from '../csv';
 import { Journal } from '../journal';
 import { stripBankStatement } from '../profiles/quickbooks-bank';
@@ -40,6 +41,7 @@ const allStatuses: Record<DiffRow['status'], Exclude<DiffFilter, 'all'>> = {
 let baseline: (Baseline & { sha256: string }) | undefined;
 const suppliers = new Map<string, SupplierFile & { workbookBytes?: Uint8Array; fingerprint: SupplierFingerprint }>();
 const defaultSupplierId = 'primary';
+let bom: { sheet: BomSheet; fingerprint: BomFingerprint } | undefined;
 let price: Awaited<ReturnType<typeof indexPriceResult>> | undefined;
 let inspection: ImportInspection | undefined;
 let repairSource: { filename: string; bytes: Uint8Array; sha256: string; bankSuggestions?: PlatformSuggestion[] } | undefined;
@@ -94,9 +96,9 @@ function pageOf<T>(items: readonly T[], page: number, pageSize: number): WorkerP
 const yieldToWorker = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
 
 async function indexPriceResult(result: PriceDiffResult, source: Baseline & { sha256: string }, suppliers: readonly SupplierFingerprint[],
-  pricingRule: ColumnSelection['pricingRule'], comparison: PriceComparison, progress: Progress, ensureCurrent: () => void) {
+  pricingRule: ColumnSelection['pricingRule'], comparison: PriceComparison, progress: Progress, ensureCurrent: () => void, bomFingerprint?: BomFingerprint) {
   const { updateBytes, rollbackBytes } = result;
-  const custody: PriceCustody = { baselineSha256: source.sha256, suppliers };
+  const custody: PriceCustody = { baselineSha256: source.sha256, suppliers, ...(bomFingerprint ? { bom: bomFingerprint } : {}) };
   if (result.canDownload && updateBytes && rollbackBytes) {
     [custody.updateCsvSha256, custody.rollbackCsvSha256] = await Promise.all([sha256(updateBytes), sha256(rollbackBytes)]);
     ensureCurrent();
@@ -125,14 +127,14 @@ async function indexPriceResult(result: PriceDiffResult, source: Baseline & { sh
     searchable.set(row, [row.sku, row.handle, row.woocommerce?.id, row.woocommerce?.parent, row.bigcommerce?.name, row.bigcommerce?.productId]
       .flatMap(value => value ? [value.toLowerCase()] : []));
   }
-  const issues = result.issues.filter((entry) => !rowIssues.has(entry) || /^(duplicate|currency)-/.test(entry.code));
+  const issues = result.issues.filter((entry) => entry.source !== 'bom' && (!rowIssues.has(entry) || /^(duplicate|currency)-/.test(entry.code)));
   const variantOptions = new Map(source.variants.map(({ source, options }) => [source.line, options.filter(Boolean).join(' / ')]));
   const counts = { all: rows.all.length, updated: rows.updated.length, flagged: rows.flagged.length,
     unmatched: rows.unmatched.length, unchanged: rows.unchanged.length, skipped: rows.skipped.length, 'margin-watchlist': rows['margin-watchlist'].length };
   const summary: DiffSummary = {
     status: result.status, canDownload: result.canDownload, verification: result.verification, rollbackVerification: result.rollbackVerification,
     counts, analytics: impact.summarize(), custody, ...(result.market ? { market: result.market } : {}),
-    issueCount: issues.length, formulaGuard: guardSummary(result.formulaGuard),
+    issueCount: issues.length, formulaGuard: guardSummary(result.formulaGuard), ...(result.bom ? { bom: result.bom } : {}),
     currencyConfirmationRequired: result.issues.some(({ code }) => code === 'currency-confirmation-required'),
     currencyConfirmationSupplierIds: [...new Set(result.issues.flatMap(({ code, supplierId }) =>
       code === 'currency-confirmation-required' ? [supplierId ?? defaultSupplierId] : []))],
@@ -223,6 +225,23 @@ async function run(request: WorkerRequest, progress: Progress, ensureCurrent: ()
       suppliers.delete(request.supplierId);
       price = undefined;
       return undefined;
+    case 'loadBom': {
+      price = undefined;
+      bom = undefined;
+      progress('reading', 5);
+      const bytes = new Uint8Array(await request.file.arrayBuffer());
+      const digest = await sha256(bytes);
+      progress('parsing', 35);
+      const sheet = parseBom(bytes, request.file.name);
+      const { filename, worksheet, rowCount, issues } = sheet;
+      bom = { sheet, fingerprint: { filename, ...(worksheet ? { worksheet } : {}), sha256: digest, bytes: bytes.byteLength } };
+      progress('parsing', 100);
+      return { name: filename, ...(worksheet ? { worksheet } : {}), rowCount, ...issuesMeta(issues) };
+    }
+    case 'removeBom':
+      price = undefined;
+      bom = undefined;
+      return undefined;
     case 'diffBatch': {
       price = undefined;
       const base = requireLoaded(baseline, 'Choose a ' + pricePlatformName() + ' baseline CSV first.');
@@ -232,12 +251,13 @@ async function run(request: WorkerRequest, progress: Progress, ensureCurrent: ()
         return { ...settings, supplierId, sheet, filename: input.name, fingerprint: input.fingerprint };
       });
       const { market, conflictPolicy, conflictPolicyConfirmed } = request;
-      const comparison: PriceComparison = { kind: 'batch', suppliers: batch, options: { market, conflictPolicy, conflictPolicyConfirmed } };
+      const comparison: PriceComparison = { kind: 'batch', suppliers: batch, options: { market, conflictPolicy, conflictPolicyConfirmed },
+        ...(bom ? { bom: { sheet: bom.sheet, pricingSupplierId: request.bomPricingSupplierId } } : {}) };
       progress('comparing', 5);
       const result = runPriceComparison(base, comparison, progress);
       progress('comparing', 91);
       const state = await indexPriceResult(result, base, batch.map(({ fingerprint }) => fingerprint),
-        batch.length === 1 ? batch[0].selection.pricingRule : undefined, comparison, progress, ensureCurrent);
+        batch.length === 1 ? batch[0].selection.pricingRule : undefined, comparison, progress, ensureCurrent, bom?.fingerprint);
       ensureCurrent();
       price = state;
       progress('comparing', 100);
@@ -259,11 +279,11 @@ async function run(request: WorkerRequest, progress: Progress, ensureCurrent: ()
       if (request.type === 'priceFormulaPreview') return previewPricingFormula(base, sheet, selection);
       const comparison: PriceComparison = { kind: 'single', supplier: {
         sheet, selection, resolutions: request.resolutions, supplierId, label: request.label, filename: input.name,
-      } };
+      }, ...(bom ? { bom: { sheet: bom.sheet, pricingSupplierId: request.bomPricingSupplierId } } : {}) };
       progress('comparing', 5);
       const result = runPriceComparison(base, comparison, progress);
       progress('comparing', 91);
-      const state = await indexPriceResult(result, base, [input.fingerprint], request.selection.pricingRule, comparison, progress, ensureCurrent);
+      const state = await indexPriceResult(result, base, [input.fingerprint], request.selection.pricingRule, comparison, progress, ensureCurrent, bom?.fingerprint);
       ensureCurrent();
       price = state;
       progress('comparing', 100);

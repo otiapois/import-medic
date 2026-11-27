@@ -30,6 +30,10 @@ export function PriceFingerprints({ custody, ready }: { custody: DiffSummary['cu
       field: `supplier-${index + 1}`, label: `Supplier ${index + 1}`, sha256,
       detail: `${filename} · ${bytes.toLocaleString('en-US')} bytes`,
     })),
+    ...(custody.bom ? [{
+      field: 'bom', label: 'Bundle BOM', sha256: custody.bom.sha256,
+      detail: [custody.bom.filename, custody.bom.worksheet, `${custody.bom.bytes.toLocaleString('en-US')} bytes`].filter(Boolean).join(' · '),
+    }] : []),
     { field: 'update', label: 'Update CSV', sha256: ready ? custody.updateCsvSha256 : undefined },
     { field: 'rollback', label: 'Rollback CSV', sha256: ready ? custody.rollbackCsvSha256 : undefined },
   ]} />;

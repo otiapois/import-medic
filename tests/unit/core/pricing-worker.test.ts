@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { expect, it, vi } from 'vitest';
+import { sha256 } from '../../../src/core/audit/custody';
 import type { WorkerMessage, WorkerReply, WorkerRequest } from '../../../src/core/worker/protocol';
 
 it('transfers repeatable verified byte pairs and clears stale exports on invalidation or failed comparison', async () => {
@@ -87,6 +88,32 @@ it('transfers repeatable verified byte pairs and clears stale exports on invalid
     const regionalUpdate = await send(update);
     if (regionalUpdate.kind !== 'result' || !regionalUpdate.value || !('bytes' in regionalUpdate.value)) throw new Error('Expected market update');
     expect(new TextDecoder().decode(regionalUpdate.value.bytes)).toBe('Handle,Title,Option1 Name,Option1 Value,Variant SKU,Price / UAE\nboot,Boot,Color,Red,0007,73.45');
+
+    const bomFile = new File(['Bundle SKU,Component SKU,Quantity\nKIT,0007,2'], 'bundle.csv');
+    expect(await send({ type: 'loadBom', file: bomFile }))
+      .toMatchObject({ kind: 'result', value: { name: 'bundle.csv', rowCount: 1, issues: [] } });
+    expect(await send(update)).toMatchObject({ kind: 'error' });
+    const bundleBaseline = baseline.replace('Variant Price\n', 'Variant Price,Cost per item\n')
+      + ',5.00\nkit,Kit,Title,Default Title,KIT,20.000,10.00';
+    await send({ type: 'loadBaseline', file: new File([bundleBaseline], 'kit-store.csv') });
+    await send({ type: 'loadSupplier', file: new File(['SKU,Cost\n0007,6.00'], 'kit-supplier.csv') });
+    const bomSha256 = await sha256(new Uint8Array(await bomFile.arrayBuffer()));
+    expect(await send(request)).toMatchObject({ kind: 'result', value: { canDownload: true,
+      custody: { bom: { filename: 'bundle.csv', sha256: bomSha256 } },
+      bom: { kits: [{ sku: 'KIT', oldCost: '10.00', newCost: '12.00', newRetail: '26.40' }] },
+    } });
+    expectPriceCsv(await send(update), 'KIT,26.40');
+    expectPriceCsv(await send({ type: 'download', format: 'price-audit-json' }), bomSha256);
+    expectPriceCsv(await send({ type: 'download', format: 'price-signoff-html' }), 'Bundle Cost Rollup');
+    await send({ type: 'loadBom', file: new File(['Bundle SKU,Component SKU,Quantity\nKIT,0007,2\n0007,KIT,1'], 'cycle.csv') });
+    expect(await send(request)).toMatchObject({ kind: 'result', value: { canDownload: false,
+      bom: { issues: [{ code: 'bom-cycle', rows: [2, 3], bomPath: ['KIT', '0007', 'KIT'] }, { code: 'bom-bundle-supplier-conflict' }] },
+    } });
+    expect(await send(rollback)).toMatchObject({ kind: 'error' });
+    await send({ type: 'removeBom' });
+    const withoutBom = await send(request);
+    expect(withoutBom).toMatchObject({ kind: 'result', value: { canDownload: true } });
+    if (withoutBom.kind === 'result') expect(withoutBom.value).not.toHaveProperty('bom');
 
     const bigcommerce = 'Item Type,Product ID,Product Name,Product Code/SKU,Price\nProduct,10,Boot,0007,20.000';
     expect(await send({ type: 'loadBaseline', platform: 'bigcommerce', file: new File([bigcommerce], 'bulk-edit.csv') }))

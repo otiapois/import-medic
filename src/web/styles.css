@@ -434,6 +434,10 @@ code { font-family: var(--mono); }
 .price-files[data-multiple='true'] { align-items: start; }
 .price-supplier-area { display: grid; grid-template-columns: minmax(0, 1fr); gap: 9px; }
 .price-supplier-area > .button { justify-self: start; }
+.bom-entry { display: grid; gap: 5px; align-content: start; min-width: 0; }
+.bom-entry > button { justify-self: start; }
+.bom-input .price-file { border: 0; padding: 0; }
+.bom-attached { margin-inline-start: 10px; font-size: .78rem; color: var(--muted); font-weight: 600; }
 .price-supplier-stack { display: grid; align-content: start; gap: 9px; min-width: 0; }
 .price-supplier-stack > li { min-width: 0; }
 .price-source-count { margin-top: 7px; }
@@ -613,7 +617,7 @@ code { font-family: var(--mono); }
 .workspace-profile { margin-top: 13px; }
 .workspace-profile summary { color: var(--teal-strong); font-size: .92rem; font-weight: 680; }
 .workspace-profile[open] > :not(summary) { margin-top: 7px; }
-.signoff-branding, .what-if-panel {
+.signoff-branding, .what-if-panel, .bom-input {
   min-width: 0;
   padding: 10px 12px;
   border: 1px solid var(--line);
@@ -621,7 +625,7 @@ code { font-family: var(--mono); }
   background: var(--surface);
   overflow-wrap: anywhere;
 }
-.signoff-branding > summary, .what-if-panel > summary {
+.signoff-branding > summary, .what-if-panel > summary, .bom-input > summary {
   min-height: 28px;
   color: var(--teal-strong);
   font-weight: 680;
@@ -683,6 +687,19 @@ code { font-family: var(--mono); }
 .what-if-metrics dt { color: var(--muted); font-size: .82rem; }
 .what-if-metrics dd { max-width: 14ch; text-align: right; font-size: .87rem; font-weight: 670; font-variant-numeric: tabular-nums; }
 .what-if-result-actions { margin-top: 7px; }
+.bom-rollup { min-width: 0; margin-block: 13px; padding: 13px; border: 1px solid var(--line); border-radius: 10px; background: #f6f9f8; overflow-wrap: anywhere; }
+.bom-rollup > .field-help { margin-top: 3px; }
+.bom-hold { margin-top: 10px; color: var(--amber); font-size: .9rem; font-weight: 650; }
+.bom-kits { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 365px), 1fr)); align-items: start; gap: 9px; margin-top: 11px; }
+.bom-kit { min-width: 0; padding: 11px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); }
+.bom-kit h4 { font-size: 1rem; font-weight: 720; }
+.bom-metrics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 9px; }
+.bom-kit dt, .bom-kit small { display: block; color: var(--muted); font-size: .78rem; font-weight: 500; }
+.bom-kit dd { font-size: .9rem; font-weight: 680; font-variant-numeric: tabular-nums; }
+.bom-components { display: grid; gap: 5px; margin-top: 10px; }
+.bom-components > li { min-width: 0; display: grid; gap: 5px; padding: 7px 0 0; border-top: 1px solid var(--line); font-size: .875rem; }
+.bom-component-costs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.bom-component-source { color: var(--teal-strong); }
 .recipe-retained { margin-top: 16px; overflow-wrap: anywhere; }
 .recipe-controls, .recipe-save { display: flex; align-items: flex-end; flex-wrap: wrap; gap: 8px 12px; min-width: 0; }
 .recipe-save label, .price-search { display: grid; gap: 4px; min-width: 0; font-size: .875rem; font-weight: 650; }

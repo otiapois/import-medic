@@ -2,6 +2,8 @@
 
 The workbench compares a WooCommerce Products CSV with one to three supplier CSV or XLSX files using the shared supplier parsing, pricing, and review engine. The join uses exact SKU text, including leading zeros such as `00123`. Duplicate SKUs and scientific-notation SKU cells require review. Use a fresh product export from the destination store. [Shared pricing and supplier comparison](shopify-price-diff.md)
 
+An optional Bundle BOM sheet can propose `Regular price` updates for eligible existing products and variations. Those proposals use the same ID, parent, and retained sale-price checks as supplier proposals. Use the BOM breakdown in the JSON audit and offline Client Sign-Off to review the underlying cost. [Bundle BOM contract](shopify-price-diff.md#bundle-and-kit-cost-rollup)
+
 ## Native pair
 
 The update and rollback include changed simple products and variations only. Both carry `ID`, `Type`, `SKU`, `Parent`, and `Regular price`, plus `Sale price` and `Stock` when enabled. Existing variation rows retain their original IDs and parent references. WooCommerce supports parent references by SKU or `id:123`. Parent rows and unchanged siblings stay in the baseline matrix for replay, and the pair omits content fields such as `Name`, descriptions, categories, tags, attributes, images, and `Meta:*`. [WooCommerce product CSV schema](https://woocommerce.com/document/product-csv-importer-exporter/#product-csv-import-schema)

@@ -1,4 +1,5 @@
 import type { PriceCustody } from '../audit/custody';
+import type { BomRollup } from '../bom/rollup';
 import { decodeCsv, parseCsv, serializeCsv, serializeCsvRecords } from '../csv';
 import { bigCommerceWrites } from '../bigcommerce-price-diff/safety';
 import { bigCommerceFileLimit, bigCommerceIdentityHeaders, bigCommerceKey, bigCommerceStockHeader, bigIdHeader, bigNameHeader, bigPriceHeader, bigSaleHeader, bigTypeHeader } from '../bigcommerce-price-diff/source';
@@ -186,7 +187,7 @@ export interface AuditSupplier {
 export function createAudit(
   baseline: Baseline, suppliers: readonly AuditSupplier[], rows: DiffRow[], issues: DiffIssue[],
   result: Pick<PriceDiffResult, 'status' | 'verification' | 'rollbackVerification' | 'inventoryEnabled' | 'overlapCount' | 'conflictCount' | 'conflictPolicy'>,
-  exported: boolean, formulaGuard: FormulaGuardAudit, includeCompareAt: boolean, custody?: PriceCustody,
+  exported: boolean, formulaGuard: FormulaGuardAudit, includeCompareAt: boolean, custody?: PriceCustody, bom?: BomRollup,
 ): { auditCsv: string; auditJson: string } {
   const { status, verification, rollbackVerification, inventoryEnabled, overlapCount, conflictCount, conflictPolicy } = result;
   const first = suppliers[0];
@@ -276,7 +277,7 @@ export function createAudit(
   ];
   return {
     get auditJson() {
-      return JSON.stringify({ ...summary, custody, formulaGuard, issues, rows: rowReport, preservedBaselineRows, unclassifiedSupplierRows }, null, rows.length > 10_000 ? 0 : 2);
+      return JSON.stringify({ ...summary, custody, formulaGuard, issues, ...(bom ? { bom } : {}), rows: rowReport, preservedBaselineRows, unclassifiedSupplierRows }, null, rows.length > 10_000 ? 0 : 2);
     },
     get auditCsv() {
       function* records() {

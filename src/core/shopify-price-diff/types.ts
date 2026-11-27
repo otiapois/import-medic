@@ -1,11 +1,12 @@
 import type { PriceCustody } from '../audit/custody';
+import type { BomRollup } from '../bom/rollup';
 import type { FormulaGuardAudit } from '../formula-guard';
 import type { FxConversion, PricingRule } from './pricing-rules';
 import type { ShopifyMarket } from './markets';
 
 export interface DiffIssue {
   code: string;
-  source: 'baseline' | 'supplier' | 'mapping' | 'verification';
+  source: 'baseline' | 'supplier' | 'mapping' | 'verification' | 'bom';
   row: number | null;
   column: string | null;
   value: string | null;
@@ -15,6 +16,7 @@ export interface DiffIssue {
   supplierId?: string;
   supplierSource?: string;
   supplierContenders?: SupplierContender[];
+  bomPath?: string[];
 }
 
 export interface SourceCell {
@@ -173,6 +175,7 @@ export interface DiffRow {
   supplierPrice: string | null;
   computedPrice: string | null;
   landedCost?: string;
+  bomPricingSupplierId?: string;
   matchedTier?: string;
   fxApplied?: FxConversion;
   supplierCompareAtPrice: string | null;
@@ -212,6 +215,7 @@ export interface PricingPreview {
 }
 
 export interface PriceDiffResult {
+  bom?: BomRollup;
   market?: ShopifyMarket;
   rows: DiffRow[];
   issues: DiffIssue[];

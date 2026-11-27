@@ -3,12 +3,13 @@ import type { ColumnSelection, ColumnSuggestions, DiffIssue } from '../../core/s
 import type { SupplierRecipe } from '../../core/shopify-price-diff/recipe';
 import type { StorePlatform, WorkspaceProfile } from '../../core/shopify-price-diff/workspace-profile';
 import type { WorkbenchWorker } from '../../core/worker/client';
-import type { BaselineMeta, SupplierMeta } from '../../core/worker/protocol';
+import type { BaselineMeta, BomMeta, SupplierMeta } from '../../core/worker/protocol';
 import demoBaseline from '../../../fixtures/shopify-price-diff/baseline-agency.csv?raw';
 import demoSupplier from '../../../fixtures/shopify-price-diff/supplier-agency.csv?raw';
 import wooDemoBaseline from '../../../fixtures/woocommerce-price-diff/baseline.csv?raw';
 import wooDemoSupplier from '../../../fixtures/woocommerce-price-diff/supplier.csv?raw';
 import { BIGCOMMERCE_DEMO } from './bigCommerceDemo';
+import { kitBomDemo, kitDemoBaselineName } from './kitBomDemo';
 import { ModeNavigation } from './ModeNavigation';
 import { PriceDiffIssues } from './PriceDiffIssues';
 import { PriceFileInput } from './PriceFileInput';
@@ -68,6 +69,13 @@ const BIGCOMMERCE_BASELINE_FIELD = {
   formats: 'Drop a legacy BigCommerce Bulk Edit CSV export',
   label: 'Choose BigCommerce baseline CSV',
   invalid: 'Choose one BigCommerce baseline file with a .csv extension.',
+};
+
+const BOM_FIELD = {
+  title: 'Bundle BOM sheet',
+  formats: 'Drop a Bundle BOM CSV or XLSX',
+  label: 'Choose Bundle BOM sheet',
+  accept: '.csv,.xlsx',
 };
 
 const DEMOS = {
@@ -130,6 +138,7 @@ export type MappingDrafts = Readonly<Record<string, MappingDraft>>;
 
 interface PreparedFiles {
   baseline?: BaselineMeta;
+  bom?: BomMeta;
   suppliers: Readonly<Record<string, PreparedSupplier>>;
 }
 
@@ -157,17 +166,21 @@ export function PriceDiffWorkbench({ characterKeys }: { characterKeys: boolean }
   const [profileRevision, setProfileRevision] = useState(0);
   const [baselineFile, setBaselineFile] = useState<LocalFile>();
   const [baselineError, setBaselineError] = useState('');
+  const [bomFile, setBomFile] = useState<LocalFile>();
+  const [bomError, setBomError] = useState('');
+  const [bomOpen, setBomOpen] = useState(false);
+  const bomDisclosure = useRef<HTMLDetailsElement>(null);
   const [supplierInputs, setSupplierInputs] = useState<Record<string, SupplierInput>>({ [PRIMARY]: {} });
   const [order, setOrder] = useState<string[]>([PRIMARY]);
   const [labels, setLabels] = useState<Record<string, string>>({});
   const [drafts, setDrafts] = useState<MappingDrafts>({});
   const nextSupplier = useRef(2);
   const [validWorker, setValidWorker] = useState(false);
-  const loaded = useRef<{ worker: WorkbenchWorker; baseline?: BaselineMeta; suppliers: Map<string, LoadedSupplier> } | null>(null);
+  const loaded = useRef<{ worker: WorkbenchWorker; baseline?: BaselineMeta; bom?: BomMeta; suppliers: Map<string, LoadedSupplier> } | null>(null);
   const imported = useRef(new WeakMap<File, RecipeLoad>());
   const session = useWorkerSession();
   const { run, invalidate, reset, cancel, resume, paused, progress, error, finished } = session;
-  const inputs = useMemo(() => ({ baselineFile, supplierInputs }), [baselineFile, supplierInputs]);
+  const inputs = useMemo(() => ({ baselineFile, bomFile, bomError, supplierInputs }), [baselineFile, bomFile, bomError, supplierInputs]);
   const [prepared, setPrepared] = useState<{ data: PreparedFiles; inputs: typeof inputs; worker: WorkbenchWorker } | null>(null);
   const active = prepared?.inputs === inputs ? prepared.data : null;
   const busy = Boolean(progress) || paused;
@@ -175,21 +188,25 @@ export function PriceDiffWorkbench({ characterKeys }: { characterKeys: boolean }
   const platformLabel = STORE_PLATFORMS[platform];
   const woo = platform === 'woocommerce';
   const bigCommerce = platform === 'bigcommerce';
+  const usingKitDemo = baselineFile?.synthetic && baselineFile.file.name === kitDemoBaselineName(platform);
   const baselineField = woo ? WOO_BASELINE_FIELD : bigCommerce ? BIGCOMMERCE_BASELINE_FIELD : FILE_FIELDS.baseline;
   const markets = active?.baseline?.markets;
   const market = markets?.find(({ name }) => name === marketName);
 
   useEffect(() => {
-    const { baselineFile, supplierInputs } = inputs;
+    const { baselineFile, bomFile, supplierInputs } = inputs;
     const entries = Object.entries(supplierInputs);
-    if (paused || (!baselineFile && !entries.some(([, { file, recipeFile }]) => file || recipeFile))) return;
+    if (paused || (!baselineFile && !bomFile && !entries.some(([, { file, recipeFile }]) => file || recipeFile))) return;
     void run(async ({ worker, progress: update, isCurrent }): Promise<PreparedFiles> => {
       if (loaded.current?.worker !== worker) {
-        const baseline = baselineFile ? await worker.request({ type: 'loadBaseline', file: baselineFile.file, platform }, update) : undefined;
+        const [baseline, bom] = await Promise.all([
+          baselineFile ? worker.request({ type: 'loadBaseline', file: baselineFile.file, platform }, update) : undefined,
+          bomFile ? worker.request({ type: 'loadBom', file: bomFile.file }, update) : undefined,
+        ]);
         if (!isCurrent()) throw new Error('The price files changed.');
-        loaded.current = { worker, baseline, suppliers: new Map() };
+        loaded.current = { worker, baseline, bom, suppliers: new Map() };
       }
-      const { baseline, suppliers } = loaded.current;
+      const { baseline, bom, suppliers } = loaded.current;
       const details = await Promise.all(entries.map(async ([supplierId, { file, sheetChoice, recipeFile }]): Promise<[string, PreparedSupplier]> => {
         let recipeLoad = recipeFile ? imported.current.get(recipeFile) : undefined;
         if (recipeFile && !recipeLoad) {
@@ -267,11 +284,11 @@ export function PriceDiffWorkbench({ characterKeys }: { characterKeys: boolean }
           },
         }];
       }));
-      return { baseline, suppliers: Object.fromEntries(details) };
+      return { baseline, bom, suppliers: Object.fromEntries(details) };
     }, (data, worker) => {
       setPrepared((previous) => ({ data: previous?.inputs === inputs ? previous.data : data, inputs, worker }));
       setValidWorker(true);
-    }, baselineFile || entries.some(([, { file }]) => file) ? 'reading' : 'parsing');
+    }, baselineFile || bomFile || entries.some(([, { file }]) => file) ? 'reading' : 'parsing');
   }, [inputs, paused, platform, run]);
 
   function clearPriceReport(reloadFiles: boolean, duringRead = false) {
@@ -320,12 +337,31 @@ export function PriceDiffWorkbench({ characterKeys }: { characterKeys: boolean }
     }
   }
 
+  function replaceBom(file: LocalFile | undefined, error = '') {
+    clearPriceReport(true);
+    setBomFile(file);
+    setBomError(error);
+  }
+
+  function loadBom(choices: FileList) {
+    if (!choices.length) return;
+    const file = choices[0];
+    if (choices.length !== 1 || !FILE_FIELDS.supplier.extension.test(file.name)) {
+      replaceBom(undefined, 'Choose one Bundle BOM file with a .csv or .xlsx extension.');
+      return;
+    }
+    replaceBom({ file, synthetic: false });
+  }
+
   function resetBatch() {
     clearPriceReport(true);
     setDrafts({});
     setMarketName(undefined);
     setTargetChanged(false);
     setBaselineError('');
+    setBomFile(undefined);
+    setBomError('');
+    if (bomDisclosure.current) bomDisclosure.current.open = false;
     setLabels({});
     setOrder([PRIMARY]);
   }
@@ -342,7 +378,7 @@ export function PriceDiffWorkbench({ characterKeys }: { characterKeys: boolean }
 
   function choosePlatform(next: StorePlatform) {
     if (platform === next) setPendingPlatform(null);
-    else if (baselineFile || profile || Object.values(supplierInputs).some(({ file, recipeFile }) => file || recipeFile)) setPendingPlatform(next);
+    else if (baselineFile || bomFile || bomError || profile || Object.values(supplierInputs).some(({ file, recipeFile }) => file || recipeFile)) setPendingPlatform(next);
     else switchPlatform(next);
   }
 
@@ -353,6 +389,28 @@ export function PriceDiffWorkbench({ characterKeys }: { characterKeys: boolean }
     setSupplierInputs({
       [PRIMARY]: { file: { file: new File([demo.supplier], demo.supplierName, { type: 'text/csv' }), synthetic: true } },
     });
+  }
+
+  function loadKitDemo() {
+    resetBatch();
+    const demo = kitBomDemo(platform);
+    setBaselineFile(demo.baseline);
+    setSupplierInputs({ [PRIMARY]: { file: demo.supplier } });
+    setBomFile(demo.bom);
+    setDrafts({
+      [PRIMARY]: {
+        remapped: false,
+        unresolved: [],
+        selection: {
+          joinKey: 'sku',
+          skuColumn: 0,
+          priceColumn: 1,
+          confirmed: true,
+          pricingRule: { mode: 'multiplier', multiplier: '2' },
+        },
+      },
+    });
+    if (bomDisclosure.current) bomDisclosure.current.open = true;
   }
 
   function addSupplier() {
@@ -490,10 +548,10 @@ export function PriceDiffWorkbench({ characterKeys }: { characterKeys: boolean }
               </div>
               <button type="button" className="button button-secondary" onClick={loadDemo}>{DEMOS[platform].label}</button>
             </div>
-            {woo && baselineFile?.synthetic && supplierInputs[PRIMARY]?.file?.synthetic ? <p className="field-help">
+            {woo && !usingKitDemo && baselineFile?.synthetic && supplierInputs[PRIMARY]?.file?.synthetic ? <p className="field-help">
               For the synthetic cost sheet, select Tiered cost brackets before confirming the columns. You can also map Sale price and Stock.
             </p> : null}
-            {bigCommerce && baselineFile?.synthetic && supplierInputs[PRIMARY]?.file?.synthetic ? <p className="field-help">
+            {bigCommerce && !usingKitDemo && baselineFile?.synthetic && supplierInputs[PRIMARY]?.file?.synthetic ? <p className="field-help">
               Optionally map Sale Price and Stock. The standalone mug has price, sale and stock changes. The shirt SKU has a stock-only change.
             </p> : null}
             {bigCommerce ? <p className="field-help catalog-import-note">Legacy Bulk Edit supports pricing for standalone products. For product groups with SKU rows, this studio supports tracked stock updates and holds pricing changes. SKU Price is read-only and SKU rows have no editable Sale Price.</p> : null}
@@ -567,6 +625,27 @@ export function PriceDiffWorkbench({ characterKeys }: { characterKeys: boolean }
                 </ol>
                 <button type="button" className="button button-secondary button-small" disabled={order.length >= 3}
                   onClick={addSupplier}>+ Add another supplier sheet</button>
+                <div className="bom-entry">
+                  <details className="bom-input" ref={bomDisclosure} onToggle={(event) => setBomOpen(event.currentTarget.open)}>
+                    <summary>Bundle BOM sheet (optional){bomFile ? <span className="bom-attached" aria-hidden="true">Attached</span> : null}</summary>
+                    {bomOpen ? (
+                      <>
+                        <p className="field-help">Required columns are Bundle SKU, Component SKU, and Quantity. Assembly Cost is optional. XLSX needs one visible worksheet.</p>
+                        <PriceFileInput side="bom" field={BOM_FIELD} showTitle={false} file={bomFile}
+                          message={{ reading: Boolean(progress && bomFile && !active), error: bomError }}
+                          onLoad={loadBom} onClear={() => replaceBom(undefined)} clearLabel="Remove Bundle BOM sheet">
+                          {active?.bom ? <p className="field-help">
+                            {active.bom.worksheet ? <>Worksheet <strong>{active.bom.worksheet}</strong> · </> : null}
+                            {active.bom.rowCount.toLocaleString('en-US')} {active.bom.rowCount === 1 ? 'BOM row' : 'BOM rows'}
+                          </p> : null}
+                          {!reviewSources ? <PriceDiffIssues issues={active?.bom?.issues ?? []} title="Bundle BOM file checks" /> : null}
+                          {bomError ? <button className="text-button" type="button" onClick={() => replaceBom(undefined)}>Clear BOM selection</button> : null}
+                        </PriceFileInput>
+                      </>
+                    ) : null}
+                  </details>
+                  <button type="button" className="text-button" onClick={loadKitDemo}>Load Synthetic Kit BOM Demo</button>
+                </div>
               </div>
             </div>
             <WorkerStatus progress={progress} paused={paused} finished={finished} error={error} focusHeading={heading} onCancel={() => {
@@ -580,9 +659,9 @@ export function PriceDiffWorkbench({ characterKeys }: { characterKeys: boolean }
         </div>
         {reviewSources ? (
           <Suspense fallback={<p role="status">Opening price review…</p>}>
-            <PriceDiffReview key={profileRevision} platform={platform} workspaceCurrency={profile?.storeCurrency} session={session} worker={validWorker && !paused ? prepared?.worker ?? null : null}
+            <PriceDiffReview key={profileRevision} platform={platform} workspaceCurrency={profile?.storeCurrency} session={session} worker={validWorker && !paused && !bomError ? prepared?.worker ?? null : null}
               sources={reviewSources} baselineIssues={active?.baseline?.issues ?? []} drafts={drafts} setDrafts={setDrafts}
-              baselineFile={baselineFile?.file} onPairAvailable={setBuildPair} characterKeys={characterKeys}
+              baselineFile={baselineFile?.file} bom={active?.bom} onPairAvailable={setBuildPair} characterKeys={characterKeys}
               market={market} targetChanged={targetChanged} targetSelector={targetSelector} active={mode === 'build'}
               onRecipe={(supplierId, file) => updateSupplier(supplierId, { recipeFile: file ?? undefined, sheetChoice: undefined }, false)} />
           </Suspense>

@@ -5,9 +5,17 @@ export interface SupplierFingerprint {
   bytes: number;
 }
 
+export interface BomFingerprint {
+  filename: string;
+  worksheet?: string;
+  sha256: string;
+  bytes: number;
+}
+
 export interface PriceCustody {
   baselineSha256: string;
   suppliers: readonly SupplierFingerprint[];
+  bom?: BomFingerprint;
   updateCsvSha256?: string;
   rollbackCsvSha256?: string;
 }

@@ -5,9 +5,10 @@ import type { ColumnSelection, ColumnSuggestions, ConflictPolicy, DiffIssue, Dif
 import type { ShopifyMarket } from '../../core/shopify-price-diff/markets';
 import type { StorePlatform } from '../../core/shopify-price-diff/workspace-profile';
 import type { WorkbenchWorker } from '../../core/worker/client';
-import type { DiffFilter, DiffSummary, DownloadFormat, PricePreviewRow } from '../../core/worker/protocol';
+import type { BomMeta, DiffFilter, DiffSummary, DownloadFormat, PricePreviewRow } from '../../core/worker/protocol';
 import type { WhatIfResult, WhatIfScenario } from '../../core/whatif/simulator';
 import { BatchImpact } from './BatchImpact';
+import { BundleCostRollup } from './BundleCostRollup';
 import { PriceFingerprints } from './CustodyFingerprints';
 import { downloadFile, FormulaGuard } from './downloads';
 import { PAGE_SIZE, Pagination, pagination } from './Pagination';
@@ -59,7 +60,7 @@ const NO_ROW_DECISIONS: RowDecisions = {};
 type RowSettings = { compareAt: boolean; inventory: boolean; storeCurrency?: string };
 
 export function PriceDiffReview({ platform, workspaceCurrency, session, worker, sources, baselineIssues, drafts, setDrafts, onRecipe,
-  baselineFile, onPairAvailable, characterKeys, market, targetChanged, targetSelector, active }: {
+  baselineFile, bom, onPairAvailable, characterKeys, market, targetChanged, targetSelector, active }: {
   platform: StorePlatform;
   workspaceCurrency?: string;
   session: ReturnType<typeof useWorkerSession>;
@@ -70,6 +71,7 @@ export function PriceDiffReview({ platform, workspaceCurrency, session, worker, 
   setDrafts: Dispatch<SetStateAction<MappingDrafts>>;
   onRecipe: (supplierId: string, file: File | null) => void;
   baselineFile?: File;
+  bom?: BomMeta;
   onPairAvailable: (pair: GeneratedPairSource | null) => void;
   characterKeys: boolean;
   market?: ShopifyMarket;
@@ -83,6 +85,7 @@ export function PriceDiffReview({ platform, workspaceCurrency, session, worker, 
   const platformLabel = STORE_PLATFORMS[platform];
   const { run, invalidate, progress, paused } = session;
   const [policyChoice, setPolicyChoice] = useState<ConflictPolicy>();
+  const [bomPricingChoice, setBomPricingChoice] = useState<string>();
   const [notice, setNotice] = useState('');
   const [saveErrors, setSaveErrors] = useState<Record<string, string[]>>({});
   const [whatIfOpen, setWhatIfOpen] = useState(false);
@@ -133,10 +136,12 @@ export function PriceDiffReview({ platform, workspaceCurrency, session, worker, 
       storeCurrency: fx?.storeCurrency ?? (market ? undefined : workspaceCurrency),
     };
   }), [drafts, market, sources, targetChanged, workspaceCurrency]);
+  const bomPricingSupplierId = bom && settings.some(({ source, selection }) => source.id === bomPricingChoice &&
+    selection.pricingRule && selection.pricingRule.mode !== 'direct') ? bomPricingChoice : undefined;
   const restoredPolicies = new Set(settings.flatMap(({ selection }) => selection.conflictPolicy ? [selection.conflictPolicy] : []));
   const conflictPolicy = policyChoice ?? (restoredPolicies.size === 1 ? [...restoredPolicies][0] : 'block-conflicts');
   const configuration = useMemo(() => ({ settings, conflictPolicy }), [settings, conflictPolicy]);
-  const decisionContext = useMemo(() => ({ sources, conflictPolicy, market }), [sources, conflictPolicy, market]);
+  const decisionContext = useMemo(() => ({ sources, conflictPolicy, market, bomPricingSupplierId }), [sources, conflictPolicy, market, bomPricingSupplierId]);
   const [confirmedPolicy, setConfirmedPolicy] = useState<{
     configuration?: typeof configuration;
     scenario?: { context: typeof decisionContext; drafts: MappingDrafts };
@@ -146,8 +151,8 @@ export function PriceDiffReview({ platform, workspaceCurrency, session, worker, 
   const approvedScenario = confirmedPolicy?.scenario;
   const conflictPolicyConfirmed = confirmedPolicy?.configuration === configuration ||
     (approvedScenario?.drafts === drafts && approvedScenario.context === decisionContext);
-  const preparedInputs = useMemo(() => ({ configuration, resolutions, conflictPolicyConfirmed, worker }),
-    [configuration, resolutions, conflictPolicyConfirmed, worker]);
+  const preparedInputs = useMemo(() => ({ configuration, resolutions, conflictPolicyConfirmed, worker, bomPricingSupplierId }),
+    [configuration, resolutions, conflictPolicyConfirmed, worker, bomPricingSupplierId]);
   const [report, setReport] = useState<{ summary: DiffSummary; worker: WorkbenchWorker; inputs: typeof preparedInputs } | null>(null);
   const canCompare = settings.every((item) => item.canCompare);
   const allConfirmed = settings.every(({ selection }) => selection.confirmed);
@@ -158,7 +163,8 @@ export function PriceDiffReview({ platform, workspaceCurrency, session, worker, 
     [source.id, { compareAt, inventory, storeCurrency }])), [settings]);
   const overlapCount = (market || targetChanged ? summary : report?.summary)?.overlapCount ?? 0;
   const policyPending = multiple && overlapCount > 0 && conflictPolicy !== 'block-conflicts' && !conflictPolicyConfirmed;
-  const ready = nativePairReady(summary) && !policyPending;
+  const ready = nativePairReady(summary) && !policyPending && (!bom || Boolean(summary?.bom));
+  const bomPricingSuppliers = report?.summary.bom?.pricingSuppliers ?? [];
   const scenarioReport = active && whatIfOpen && allConfirmed && summary && !summary.mappingBlocked && !policyPending ? report : null;
   const compareScenarios = useMemo(() => scenarioReport
     ? (scenarios: WhatIfScenario[]) => scenarioReport.worker.request({ type: 'simulatePrice', scenarios })
@@ -192,9 +198,10 @@ export function PriceDiffReview({ platform, workspaceCurrency, session, worker, 
   useEffect(() => {
     if (!worker || !canCompare) return;
     void run(({ worker, progress: update }) => {
+      const scope = { ...(market ? { market: market.name } : {}), ...(bomPricingSupplierId ? { bomPricingSupplierId } : {}) };
       if (multiple) {
         return worker.request({
-          type: 'diffBatch', conflictPolicy, conflictPolicyConfirmed, ...(market ? { market: market.name } : {}),
+          type: 'diffBatch', conflictPolicy, conflictPolicyConfirmed, ...scope,
           suppliers: settings.map(({ source, selection }) => ({
             supplierId: source.id, label: source.label, sheetIndex: source.mapping.sheetIndex,
             selection, resolutions: resolutions[source.id] ?? NO_ROW_DECISIONS,
@@ -204,10 +211,10 @@ export function PriceDiffReview({ platform, workspaceCurrency, session, worker, 
       const [{ source, selection }] = settings;
       return worker.request({
         type: 'diff', supplierId: source.id, label: source.labelOverride, sheetIndex: source.mapping.sheetIndex,
-        selection, resolutions: resolutions[source.id] ?? NO_ROW_DECISIONS, ...(market ? { market: market.name } : {}),
+        selection, resolutions: resolutions[source.id] ?? NO_ROW_DECISIONS, ...scope,
       }, update);
     }, (summary, worker) => setReport({ summary, worker, inputs: preparedInputs }), 'comparing');
-  }, [preparedInputs, worker, canCompare, multiple, conflictPolicy, conflictPolicyConfirmed, market, settings, resolutions, run]);
+  }, [preparedInputs, worker, canCompare, multiple, conflictPolicy, conflictPolicyConfirmed, market, settings, resolutions, run, bomPricingSupplierId]);
 
   function patchSelection(supplierId: string, change: Partial<ColumnSelection>) {
     invalidate();
@@ -380,6 +387,19 @@ export function PriceDiffReview({ platform, workspaceCurrency, session, worker, 
             ) : null}
           </div>
         ) : null}
+        {bomPricingSuppliers.length > 1 ? (
+          <div className="price-conflict-policy">
+            <label htmlFor={`${id}-bom-rule`}>Bundle pricing supplier</label>
+            <select id={`${id}-bom-rule`} value={bomPricingSupplierId ?? ''} onChange={(event) => {
+              invalidate();
+              void worker?.request({ type: 'invalidatePrice' }).catch(() => undefined);
+              setBomPricingChoice(event.currentTarget.value || undefined);
+            }}>
+              <option value="">Choose a cost-based pricing rule</option>
+              {bomPricingSuppliers.map(({ supplierId, label }) => <option key={supplierId} value={supplierId}>{label}</option>)}
+            </select>
+          </div>
+        ) : null}
       </div>
       <div className="price-section price-preview">
         <div className="price-heading">
@@ -394,6 +414,8 @@ export function PriceDiffReview({ platform, workspaceCurrency, session, worker, 
           </span>
         </div>
         <p className="sr-only" role="status">{notice}</p>
+        {summary?.bom ? <BundleCostRollup bom={summary.bom} market={Boolean(market)} />
+          : <PriceDiffIssues issues={bom?.issues ?? []} title="Bundle BOM file checks" />}
         {!allConfirmed && !summary ? <PriceDiffIssues issues={[...baselineIssues, ...sources.flatMap(({ issues }) => issues)]} title="File checks" /> : null}
         {report && summary?.issueCount ? <PriceIssues worker={report.worker} summary={summary} showSupplierSource={multiple} /> : null}
         {allConfirmed && !summary?.mappingBlocked ? (

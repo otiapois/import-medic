@@ -1,5 +1,7 @@
 import type { PriceCustody } from '../audit/custody';
 import { decodeCsv } from '../csv';
+import { applyBomPricing, isSupplierCost } from '../bom/pricing';
+import type { BomInputs, BomSheet } from '../bom/rollup';
 import { landedSupplierCost } from '../analytics/catalog-impact';
 import type { FormulaGuardAudit } from '../formula-guard';
 import { bigCommerceProductTracking, bigCommerceValueIssues, bigCommerceWrites, readBigCommerceStock } from '../bigcommerce-price-diff/safety';
@@ -241,7 +243,7 @@ function prepareComparison(rule: PricingRule | undefined, woo: boolean, costColu
 
 function comparePrices(
   result: DiffRow, identity: SupplierIdentity, sheet: SupplierSheet, mapping: ResolvedMapping,
-  currencyPositions: readonly number[], resolution: RowResolution | undefined, pricing: ReturnType<typeof prepareComparison>,
+  currencyPositions: readonly number[], resolution: RowResolution | undefined, pricing: ReturnType<typeof prepareComparison>, bomComponentCost = false,
 ): { issues: DiffIssue[]; currency: string[] } {
   const row = identity.row;
   const { fx, applyPricing, applyMappedCompareAt, applyAutoCompareAt, costKnown, costRate } = pricing;
@@ -259,6 +261,14 @@ function comparePrices(
     if (blank && (compareAt && (override !== undefined || !autoCompareAt) ||
       !compareAt && mapping.bigcommerce && mapping.inventory !== null && override === undefined)) return old;
     const original = selectedAmount(raw, source);
+    if (!compareAt && bomComponentCost && original?.units === 0n && override === undefined) {
+      result.landedCost = '0.00';
+      if (!fx) {
+        if (original.currency) currency.push(original.currency);
+        if (source?.currency) currency.push(source.currency);
+      }
+      return old;
+    }
     const retail = autoCompareAt && result.newPrice !== null ? readAmount(result.newPrice) : null;
     if (autoCompareAt && !retail && override === undefined) return null;
     const computedRetail = !compareAt && original ? applyPricing(original) : null;
@@ -266,7 +276,7 @@ function comparePrices(
     if (!compareAt) {
       result.computedPrice = computedRetail?.text ?? null;
       if (computedRetail?.matchedTier) result.matchedTier = computedRetail.matchedTier;
-      if (costKnown && original && original.units > 0n) result.landedCost = landedSupplierCost(original, costRate);
+      if ((costKnown || bomComponentCost) && original && original.units > 0n) result.landedCost = landedSupplierCost(original, costRate);
     }
     if (fx && computed && index !== null) result.fxApplied = fx;
     const amount = override !== undefined ? readAmount(override) : computed;
@@ -373,7 +383,7 @@ function attachRowIssues(rows: DiffRow[], issues: DiffIssue[]): void {
 
 function compareSupplier(
   baseline: Baseline, supplier: SupplierSheet, selection: ColumnSelection, resolutions: Readonly<Record<number, RowResolution>>,
-  indices: ReturnType<typeof variantIndices>, onRows?: RowProgress,
+  indices: ReturnType<typeof variantIndices>, onRows?: RowProgress, bom?: BomSheet,
 ) {
   const suggestions = suggestColumns(baseline, supplier);
   const { mapping, issues: mappingIssues } = resolveMapping(baseline, supplier, suggestions, selection);
@@ -383,6 +393,7 @@ function compareSupplier(
   if (mapping) {
     const { dimensions, skuVariants, optionsVariants } = indices;
     const pricing = prepareComparison(selection.pricingRule, mapping.woocommerce === true || mapping.bigcommerce === true, supplier.headers[mapping.price]);
+    const sourceIsCost = bom && isSupplierCost(supplier.headers[mapping.price], selection.pricingRule);
     const { identities, issues: identityIssues } = supplierIdentities(supplier, mapping, dimensions, resolutions);
     issues.push(...identityIssues);
     const suppliers = new Map<string, SupplierIdentity>();
@@ -417,7 +428,8 @@ function compareSupplier(
         row.status = 'Skipped';
         continue;
       }
-      const evaluated = comparePrices(row, identity, supplier, mapping, currencyPositions, resolution, pricing);
+      const isBomComponentCost = sourceIsCost && bom?.componentSkus.has(variant.sku);
+      const evaluated = comparePrices(row, identity, supplier, mapping, currencyPositions, resolution, pricing, isBomComponentCost);
       issues.push(...evaluated.issues, ...compareInventory(row, identity.row, supplier, mapping, resolution));
       if (row.newInventoryQty !== row.oldInventoryQty) row.status = 'Updated';
       if (evaluated.currency.length) currenciesByRow.set(identity.row.line, evaluated.currency);
@@ -429,7 +441,27 @@ function compareSupplier(
       const row = diffRow(undefined, identity, mapping);
       const resolution = resolutions[identity.row.line];
       if (resolution?.skip) row.status = 'Skipped';
-      else issues.push(...compareInventory(row, identity.row, supplier, mapping, resolution));
+      else {
+        issues.push(...compareInventory(row, identity.row, supplier, mapping, resolution));
+        // Bundle-only parts stay unmatched in the catalog. Validate their cost without projecting a new product.
+        if (identity.sku !== null && bom?.componentSkus.has(identity.sku) && !skuVariants.has(identity.sku) && sourceIsCost) {
+          const { issues: currencyIssues, currency } = supplierCurrencies(identity.row, supplier, mapping, currencyPositions, pricing.fx);
+          issues.push(...currencyIssues);
+          const value = identity.row.cells[mapping.price];
+          const amount = selectedAmount(row.supplierPrice, value);
+          if (!amount || amount.units < 0n) {
+            issues.push(issue('supplier', 'invalid-bom-supplier-cost', 'Enter a verified nonnegative cost for this bundle component.',
+              { row: identity.row.line, column: supplier.headers[mapping.price], value: row.supplierPrice }));
+          } else {
+            row.landedCost = amount.units === 0n ? '0.00' : landedSupplierCost(amount, pricing.costRate);
+            if (!pricing.fx) {
+              if (amount.currency) currency.push(amount.currency);
+              if (value?.currency) currency.push(value.currency);
+            }
+          }
+          if (currency.length) currenciesByRow.set(identity.row.line, currency);
+        }
+      }
       candidates.push(row);
     }
     if (total) onRows?.(total, total);
@@ -560,12 +592,12 @@ function finishComparison(
 
 export function buildPriceDiff(
   baseline: Baseline, supplier: SupplierSheet, selection: ColumnSelection = {}, resolutions: Readonly<Record<number, RowResolution>> = {},
-  onVerify?: () => void, source?: Pick<SupplierDiffInput, 'supplierId' | 'label' | 'filename'>, onWork?: WorkProgress,
+  onVerify?: () => void, source?: Pick<SupplierDiffInput, 'supplierId' | 'label' | 'filename'>, onWork?: WorkProgress, bom?: BomInputs,
 ): PriceDiffResult {
   baseline = scopeShopifyMarket(baseline, selection.market);
   const indices = variantIndices(baseline);
   onWork?.('comparing', 15);
-  const { candidates, issues, suggestions, mapping, currenciesByRow } = compareSupplier(baseline, supplier, selection, resolutions, indices, reportRows(onWork, 'comparing', 15, 65));
+  const { candidates, issues, suggestions, mapping, currenciesByRow } = compareSupplier(baseline, supplier, selection, resolutions, indices, reportRows(onWork, 'comparing', 15, 65), bom?.sheet);
   issues.unshift(...baseline.issues);
   const input = describeSupplier({ supplierId: source?.supplierId ?? 'primary', label: source?.label, filename: source?.filename ?? supplier.name,
     sheet: supplier, selection, resolutions }, mapping);
@@ -576,14 +608,15 @@ export function buildPriceDiff(
       entry.supplierSource = input.label;
     }
   }
-  issues.push(...currencyReview, ...linkedOptionIssues(baseline, candidates));
+  issues.push(...currencyReview, ...(bom ? [] : linkedOptionIssues(baseline, candidates)));
   attachRowIssues(candidates, issues);
   for (const row of candidates) {
-    if (row.supplierRow !== null && (row.baselineRow !== null || mapping?.inventory != null || source && row.status !== 'Blocked')) attachSupplier(row, input);
+    const bomCost = row.sku !== null && bom?.sheet.componentSkus.has(row.sku);
+    if (row.supplierRow !== null && (row.baselineRow !== null || mapping?.inventory != null || bomCost || source && row.status !== 'Blocked')) attachSupplier(row, input);
   }
   return completeResult(baseline, [input], candidates, issues, suggestions, {
     inventoryEnabled: mapping?.inventory != null, overlapCount: 0, conflictCount: 0, conflictPolicy: 'block-conflicts',
-  }, onVerify, selection.formulaGuard === true, onWork);
+  }, onVerify, selection.formulaGuard === true, onWork, bom);
 }
 
 function describeSupplier(input: SupplierDiffInput, mapping: ResolvedMapping | null): AuditSupplier {
@@ -602,15 +635,29 @@ function attachSupplier(row: DiffRow, supplier: AuditSupplier): void {
 function completeResult(
   baseline: Baseline, suppliers: readonly AuditSupplier[], rows: DiffRow[], issues: DiffIssue[], suggestions: PriceDiffResult['suggestions'],
   batch: Pick<PriceDiffResult, 'inventoryEnabled' | 'overlapCount' | 'conflictCount' | 'conflictPolicy'>,
-  onVerify: (() => void) | undefined, formulaGuardEnabled: boolean, onWork?: WorkProgress,
+  onVerify: (() => void) | undefined, formulaGuardEnabled: boolean, onWork?: WorkProgress, bomInput?: BomInputs,
 ): PriceDiffResult {
+  const bom = bomInput ? applyBomPricing(baseline, suppliers, rows, bomInput, selectedAmount, reviewGuardCodes) : undefined;
+  if (bom) {
+    issues.push(...bom.issues);
+    const linked = linkedOptionIssues(baseline, rows);
+    issues.push(...linked);
+    const linkedByLine = new Map(linked.flatMap((entry) => entry.rows.map((line) => [line, entry] as const)));
+    for (const row of rows) {
+      const entry = row.baselineRow === null ? undefined : linkedByLine.get(row.baselineRow);
+      if (entry) {
+        row.issues.push(entry);
+        row.status = 'Blocked';
+      }
+    }
+  }
   if (baseline.market) for (const row of rows) row.market = baseline.market;
   const includeCompareAt = suppliers.some(({ mapping }) => mapping?.compareAt != null || mapping?.compareAtAutomatic === true);
   const output = finishComparison(baseline, rows, issues, { includeCompareAt, inventoryEnabled: batch.inventoryEnabled, formulaGuard: formulaGuardEnabled, onVerify, onWork });
   const { updateBytes, rollbackBytes, formulaGuard } = output;
-  const audit = (custody?: PriceCustody) => createAudit(baseline, suppliers, rows, issues, { ...output, ...batch }, updateBytes !== null, formulaGuard, includeCompareAt, custody);
+  const audit = (custody?: PriceCustody) => createAudit(baseline, suppliers, rows, issues, { ...output, ...batch }, updateBytes !== null, formulaGuard, includeCompareAt, custody, bom);
   return {
-    ...output, ...batch, rows, issues, suggestions, ...(baseline.market ? { market: baseline.market } : {}),
+    ...output, ...batch, rows, issues, suggestions, ...(bom ? { bom } : {}), ...(baseline.market ? { market: baseline.market } : {}),
     supplierPricing: suppliers.map(({ supplierId, label, filename, pricingRule }) => ({ supplierId, label, filename, pricingRule })),
     get updateCsv() { return updateBytes && decodeCsv(updateBytes).text; },
     get rollbackCsv() { return rollbackBytes && decodeCsv(rollbackBytes).text; },
@@ -628,7 +675,7 @@ const conflictMessages: Record<string, string> = {
 const reviewGuardCodes = new Set(['price-drop', 'price-increase', 'price-increase-from-zero', 'inventory-drop', 'inventory-zero-out']);
 
 export function buildMultiSupplierDiff(
-  baseline: Baseline, inputs: readonly SupplierDiffInput[], options: BatchDiffOptions = {}, onVerify?: () => void, onWork?: WorkProgress,
+  baseline: Baseline, inputs: readonly SupplierDiffInput[], options: BatchDiffOptions = {}, onVerify?: () => void, onWork?: WorkProgress, bom?: BomInputs,
 ): PriceDiffResult {
   baseline = scopeShopifyMarket(baseline, options.market);
   const indices = variantIndices(baseline);
@@ -656,7 +703,7 @@ export function buildMultiSupplierDiff(
   for (const [index, input] of validInputs.entries()) {
     const start = 15 + Math.floor(40 * index / validInputs.length);
     const end = 15 + Math.floor(40 * (index + 1) / validInputs.length);
-    const compared = compareSupplier(baseline, input.sheet, input.selection ?? {}, input.resolutions ?? {}, indices, reportRows(onWork, 'comparing', start, end));
+    const compared = compareSupplier(baseline, input.sheet, input.selection ?? {}, input.resolutions ?? {}, indices, reportRows(onWork, 'comparing', start, end), bom?.sheet);
     const { mapping } = compared;
     const supplier = describeSupplier(input, mapping);
     if (suppliers.length === 0) suggestions = compared.suggestions;
@@ -708,6 +755,9 @@ export function buildMultiSupplierDiff(
         amount: selectedAmount(evidence.price, rowLocation.cells[mapping.price]) ??
           (!fx && resolution?.price !== undefined ? readAmount(resolution.price) : null),
         outputCurrency: fx?.storeCurrency,
+        ...(row.sku !== null && bom?.sheet.componentSkus.has(row.sku)
+          ? { bomCost: isSupplierCost(input.sheet.headers[mapping.price], input.selection?.pricingRule) ? row.landedCost ?? null : null }
+          : {}),
         invalid: row.issues.some(({ code, blocking }) => blocking && !reviewGuardCodes.has(code)),
       });
       groups.set(key, candidates);
@@ -824,7 +874,7 @@ export function buildMultiSupplierDiff(
     return row;
   });
   const completeRows = [...baselineRows, ...rows];
-  const baselineIssues = [...baseline.issues, ...linkedOptionIssues(baseline, baselineRows)];
+  const baselineIssues = [...baseline.issues, ...(bom ? [] : linkedOptionIssues(baseline, baselineRows))];
   issues.push(...baselineIssues.slice(baseline.issues.length), ...retainedIssues);
   const perBaseline = new Map<number, DiffIssue[]>();
   for (const entry of baselineIssues) {
@@ -840,5 +890,5 @@ export function buildMultiSupplierDiff(
     if (row.issues.some(({ blocking }) => blocking)) row.status = 'Blocked';
   }
   return completeResult(baseline, suppliers, completeRows, issues, suggestions, { inventoryEnabled, overlapCount, conflictCount, conflictPolicy },
-    onVerify, inputs.some(({ selection }) => selection?.formulaGuard === true), onWork);
+    onVerify, inputs.some(({ selection }) => selection?.formulaGuard === true), onWork, bom);
 }

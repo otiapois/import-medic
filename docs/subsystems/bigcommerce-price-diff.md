@@ -2,6 +2,8 @@
 
 Use the legacy BigCommerce Bulk Edit product CSV and one to three supplier CSV or XLSX files. Match by exact SKU text, including leading zeros. The export may use `Product Code/SKU` or `Product SKU` as its single SKU heading. Both native files retain that heading. The comparison holds case-insensitive SKU collisions and unstable keys such as scientific-notation cells. For legacy variants, the Product and SKU rows preserve their original IDs, sequence, and option expression as exported. [Shared pricing and supplier comparison](shopify-price-diff.md) · [Legacy BigCommerce product updates](https://support.bigcommerce.com/s/article/Updating-via-Import?language=en_US) · [Legacy export field names](https://support.bigcommerce.com/s/article/Legacy-to-Modern-Product-Transfer?language=en_US)
 
+An optional Bundle BOM sheet can propose `Price` updates for eligible standalone `Product` rows. These proposals use the same grouped-pricing and retained sale-price checks as supplier proposals. Review the underlying costs in the JSON audit and offline Client Sign-Off. [Bundle BOM contract](shopify-price-diff.md#bundle-and-kit-cost-rollup)
+
 ## Native pair
 
 The baseline requires `Price`, `Item Type`, `Product ID`, `Product Name`, and the SKU column. The writable columns are `Price` and optionally `Sale Price` on standalone `Product` rows and stock on eligible `Product` or `SKU` rows. Use the exported `Stock Level` or `Current Stock Level` column. Stock updates require a nonnegative whole quantity in the baseline and `Track Inventory` on the owning Product set to `by product` for a Product write or `by option` for a SKU write. The pair omits tracking settings, descriptions, categories, images, and metadata.

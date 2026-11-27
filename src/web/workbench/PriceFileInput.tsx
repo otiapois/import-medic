@@ -1,9 +1,10 @@
 import { useId, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 
-export function PriceFileInput({ side, field, position, file, message, onLoad, onClear, clearLabel, worksheet, children }: {
+export function PriceFileInput({ side, field, showTitle = true, position, file, message, onLoad, onClear, clearLabel, worksheet, children }: {
   side: string;
   field: { title: string; formats: string; label: string; accept: string };
+  showTitle?: boolean;
   position?: number;
   file?: { file: File; synthetic?: boolean };
   message: { reading?: boolean; error?: string };
@@ -19,7 +20,7 @@ export function PriceFileInput({ side, field, position, file, message, onLoad, o
   const suffix = position && position > 1 ? ` ${position}` : '';
   return (
     <div className="price-file">
-      <h3>{field.title}{position ? ` ${position}` : ''}</h3>
+      {showTitle ? <h3>{field.title}{position ? ` ${position}` : ''}</h3> : null}
       <div
         className="drop-zone"
         data-testid={`price-${side}-dropzone${position && position > 1 ? `-${position}` : ''}`}

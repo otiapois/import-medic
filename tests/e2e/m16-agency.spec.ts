@@ -11,10 +11,10 @@ const wholesale = csv('m16-wholesale.csv', [
   ['SKU', 'Cost', 'Currency'], ['00045-XL', '10.00', 'EUR'], ['00046-L', '10.00', 'EUR'],
 ]);
 const scenarios = [
-  { key: 'current', label: 'Current Rule', retail: '23.87', cents: 574, margin: '54.545455%' },
-  { key: 'markup', label: '+5% Markup', retail: '25.06', cents: 812, margin: '56.703911%' },
-  { key: 'fx', label: 'FX +3% Buffer', retail: '24.59', cents: 718, margin: '54.552664%' },
-  { key: 'round', label: '.95 Rounding', retail: '23.95', cents: 590, margin: '54.697286%' },
+  { key: 'current', label: 'Current Rule', retail: '23.87', cents: 574, margin: '54.55%', exactMargin: '54.545455%' },
+  { key: 'markup', label: '+5% Markup', retail: '25.06', cents: 812, margin: '56.70%', exactMargin: '56.703911%' },
+  { key: 'fx', label: 'FX +3% Buffer', retail: '24.59', cents: 718, margin: '54.55%', exactMargin: '54.552664%' },
+  { key: 'round', label: '.95 Rounding', retail: '23.95', cents: 590, margin: '54.70%', exactMargin: '54.697286%' },
 ];
 const brand = { agencyName: '<script>alert(1)</script> & "Co"', preparedFor: 'O\'Brien & West', contactNote: 'Audit <copy> for "Finance"', accentKey: 'navy' };
 const sha = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex');
@@ -98,6 +98,7 @@ for (const scenario of scenarios) {
       await expect(delta).toHaveAttribute('data-retail-delta-cents', String(item.cents));
       await expect(card(item.label).locator('dt')).toHaveText(['Avg Margin %', 'Negative Margin SKUs', 'Total Retail Impact', 'Changed SKUs', 'Sub-floor SKUs', 'Lowest-margin SKU']);
       await expect(card(item.label).locator('dd')).toHaveText([item.margin, '0', '+' + (item.cents / 100).toFixed(2), '2', '0', '00045-XL']);
+      await expect(card(item.label).locator('dd').first()).toHaveAttribute('title', item.exactMargin);
     }
     const predicted = Number(await card(scenario.label).locator('[data-retail-delta-cents]').getAttribute('data-retail-delta-cents'));
     if (scenario.key === 'markup') {

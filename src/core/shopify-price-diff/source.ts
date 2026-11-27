@@ -24,7 +24,9 @@ export const canonicalShopifyHeader = (header: string) => {
   return linked ? optionLinks[Number(linked[1]) - 1] : canonicalHeader(header, shopifyAliases);
 };
 
-function readTable(name: string, source: SourceRow[], kind: 'baseline' | 'supplier', issues: DiffIssue[] = [], canonical?: (header: string) => string): SourceTable {
+type TableSource = 'baseline' | 'supplier' | 'bom';
+
+function readTable(name: string, source: SourceRow[], kind: TableSource, issues: DiffIssue[] = [], canonical?: (header: string) => string): SourceTable {
   const [head, ...rows] = source;
   const headers = Array.from(head?.cells ?? [], (cell) => cell?.value ?? '');
   const first = head?.line ?? null;
@@ -56,7 +58,7 @@ export interface CsvReadOptions {
   requireUtf8?: boolean;
 }
 
-export function readCsvTable(bytes: Uint8Array, name: string, kind: 'baseline' | 'supplier', canonical?: (header: string) => string,
+export function readCsvTable(bytes: Uint8Array, name: string, kind: TableSource, canonical?: (header: string) => string,
   options?: CsvReadOptions): SourceTable {
   const decoded = decodeCsv(bytes);
   if (decoded.encoding === 'unknown') return readTable(name, [], kind, [issue(kind, 'invalid-encoding', 'The file encoding could not be decoded.')]);

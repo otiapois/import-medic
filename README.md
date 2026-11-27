@@ -1,6 +1,6 @@
 # ImportMedic
 
-ImportMedic compares a Shopify, WooCommerce, or legacy BigCommerce product export with one to three supplier CSV or XLSX files in your browser. Use supplier prices directly or calculate retail prices from wholesale costs, with optional manual currency conversion, cost brackets, and stock updates where supported. Review proposed changes and competing offers before downloading matched update and rollback CSVs, audits, or a standalone Client Sign-Off HTML report. Save supplier mappings and store defaults as separate JSON files. A separate workbench repairs Shopify Products, QuickBooks Online Bank, Stripe or PayPal, Xero bank statement, and FreshBooks expense CSVs and offers a printable Bookkeeper Sign-Off HTML report.
+ImportMedic compares a Shopify, WooCommerce, or legacy BigCommerce product export with one to three supplier CSV or XLSX files in your browser. Use supplier prices directly or calculate retail prices from wholesale costs, with optional manual currency conversion, cost brackets, and stock updates where supported. Attach a bundle bill of materials to recalculate kit costs when component prices change. Review proposed changes and competing offers before downloading matched update and rollback CSVs, audits, or a standalone Client Sign-Off HTML report. Save supplier mappings and store defaults as separate JSON files. A separate workbench repairs Shopify Products, QuickBooks Online Bank, Stripe or PayPal, Xero bank statement, and FreshBooks expense CSVs and offers a printable Bookkeeper Sign-Off HTML report.
 
 **Verify Before Import** inspects an existing update or rollback CSV against the original Shopify, WooCommerce, or legacy BigCommerce export. It checks product identity and grouping, shows exact changes in the allowed price or stock cells, and fingerprints both files in the browser. Store checks and imports take place in the store's admin.
 
@@ -52,6 +52,15 @@ ImportMedic re-parses both downloads and replays the update followed by its matc
 
 Each XLSX supplier slot starts with the workbook's first visible worksheet. If there are multiple visible tabs, open **Supplier worksheet** beside that supplier's filename and select the intended tab. Check the new headers and suggested mapping before confirming. An explicit selection binds that slot to the exact worksheet name independently of the other slots. Store XLSX SKUs as text to preserve leading zeros. Numeric and scientific-notation SKU cells, formulas in mapped key, price or quantity cells, and duplicate keys within a sheet require review. ImportMedic warns about formulas with missing cached values and never evaluates workbook formulas.
 
+### Reprice bundles and kits
+
+1. In **Build Update**, choose a platform, load a fresh catalog export and supplier cost sheet, and attach a **Bundle BOM sheet** for base store pricing. Use CSV or an XLSX file with one visible worksheet. Include `Bundle SKU`, `Component SKU`, `Quantity`, and optional `Assembly Cost`. Use exact SKUs and keep leading-zero Excel SKUs as text. Quantities must be positive whole numbers. Enter the assembly cost once per kit or repeat the same value across its component rows.
+2. Confirm the supplier cost mapping and a cost-based retail rule, such as a multiplier. The rollup uses validated supplier costs and shows any fallback to an explicit baseline cost. A component found only in the supplier sheet can contribute its verified cost and remains unmatched for the native update. Each kit needs its own eligible catalog row. The BOM assembly costs and baseline component costs are in store currency. Any supplier conversion uses the existing confirmed manual FX settings.
+3. Review **Bundle Cost Rollup** for each kit's old cost, new cost, components, and projected margin. Circular references, missing or unpriced components, invalid inputs, and nesting beyond five kit levels hold the native pair. Correct the source using the reported lines and rebuild. A proposed price below the rolled-up cost also holds the pair. Review the confirmed pricing rule and any sale price.
+4. Download the verified native update and rollback for the selected platform, then check both in **Verify Update / Rollback CSV**. Keep the JSON audit and offline Client Sign-Off with the catalog, supplier, BOM, and CSV files. Compare the BOM and available file digests with the original and downloaded bytes. The replay checks exact recovery of the uploaded catalog cells. [Bundle BOM contract](docs/subsystems/shopify-price-diff.md#bundle-and-kit-cost-rollup)
+
+Choose **Load Synthetic Kit BOM Demo** to try a nested example. Leaving the BOM field empty uses the regular supplier comparison.
+
 ### Compare two supplier pricebooks
 
 1. Open **Supplier Delta** in the price workbench. Add the previous and new CSV or XLSX pricebooks, or choose **Load Synthetic Supplier Delta Demo**. For multi-tab Excel files, set **Previous worksheet** and **New worksheet** as needed.
@@ -91,6 +100,8 @@ Download the matched files and inspect both in **Verify Update / Rollback CSV**.
 ### Review batch impact and margins
 
 After a catalog comparison, check **Batch Impact & Margin Summary** for price moves, average and range of gross margins, and the change in comparable stock when quantity is mapped. Margin uses a known landed supplier cost and the effective retail price, including a WooCommerce sale price when present. Select **Zero / Negative Margin Alert** to show affected SKUs in the diff. The offline Client Sign-Off HTML includes the batch summary for review before import.
+
+The onscreen price-change column shows a sign and up to two decimal places. Calculations and the six-decimal audit values keep their existing precision.
 
 Expand **Interactive Margin What-If** in the completed **Build Update** review. Compare **Current Rule** with **+5% Markup**, **FX +3% Buffer**, **.95 Rounding**, or a custom scenario. FX scenarios use the rate confirmed for the batch. Review the average margin, negative-margin SKU count, and total retail impact. Use **Apply Scenario** for an eligible result, then review the updated comparison and download the verified pair. The retail impact sums price changes across the affected catalog rows. [Scenario calculations and review rules](docs/subsystems/shopify-price-diff.md#margin-what-if-simulator)
 
@@ -144,7 +155,7 @@ Use **Download Bookkeeper Sign-Off (.html)** to open or print the standalone rep
 
 ### Verify file fingerprints
 
-Use **SHA-256 file fingerprints** in the price workbench to compare the baseline, supplier files, and available update and rollback CSVs with the JSON audit or Client Sign-Off HTML. An explicit XLSX worksheet selection is recorded alongside the original whole-workbook fingerprint. The single-file repair shows the source and available repaired CSV fingerprints with the same values in its JSON audit and Bookkeeper Sign-Off HTML. Hash the original files and the downloads before resaving them in a spreadsheet editor. A digest match verifies that the file bytes match the recorded fingerprint. Keep the audit or report with the files it references.
+Use **SHA-256 file fingerprints** in the price workbench to compare the baseline, supplier files, optional BOM, and available update and rollback CSVs with the JSON audit or Client Sign-Off HTML. An explicit XLSX worksheet selection is recorded alongside the original whole-workbook fingerprint. The single-file repair shows the source and available repaired CSV fingerprints with the same values in its JSON audit and Bookkeeper Sign-Off HTML. Hash the original files and the downloads before resaving them in a spreadsheet editor. A digest match verifies that the file bytes match the recorded fingerprint. Keep the audit or report with the files it references.
 
 ## Verify local processing
 
@@ -170,7 +181,7 @@ The single-file repair workbench in a local desktop browser run with synthetic d
 
 ```mermaid
 flowchart LR
-  A[Local catalog CSV and up to three supplier CSV or XLSX files] --> B[React workbench]
+  A[Local catalog CSV, supplier sheets, and optional bundle BOM] --> B[React workbench]
   B --> C[Supplier merge and diff in local Web Worker]
   C --> D[Matched native CSV pair, audits, and offline sign-off]
   E[Local CSV] --> F[Repair workbench]

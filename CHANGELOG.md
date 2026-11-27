@@ -1,5 +1,11 @@
 # Changelog
 
+## v1.7.0 (M17)
+
+- Attach an optional **Bundle BOM sheet** to **Build Update** for Shopify, WooCommerce, or legacy BigCommerce. Recalculate kit costs from supplier and baseline component costs, apply the confirmed retail rule, and review the projected margin and cost breakdown for nested kits up to five levels deep.
+- Hold both native files for unsafe BOM inputs such as circular references, unpriced components, invalid quantities, or excessive nesting. Keep the original BOM fingerprint and the affected source lines with the JSON audit and offline Client Sign-Off.
+- Add seeded fuzz coverage for nested cost rollups, invalid dependency graphs, and matched native update and rollback replay on all three platforms.
+
 ## v1.6.0 (M16)
 
 - Set an agency name and accent for the offline Client, Campaign, Supplier Delta, Migration, and Bookkeeper Sign-Off reports. Add a client name and contact note if needed. Save the branding in a Workspace Profile JSON and load it in either workbench.

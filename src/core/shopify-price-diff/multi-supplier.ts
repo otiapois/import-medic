@@ -1,4 +1,4 @@
-﻿import { amountGreaterThan, currenciesAgree, readAmount, sameAmount, type Amount } from './prices';
+import { amountGreaterThan, currenciesAgree, readAmount, sameAmount, type Amount } from './prices';
 import type { DiffRow, SupplierContender, ConflictPolicy } from './types';
 
 export interface SupplierCandidate {
@@ -8,6 +8,7 @@ export interface SupplierCandidate {
   currency: string[];
   outputCurrency?: string;
   invalid: boolean;
+  bomCost?: string | null;
 }
 
 const equalAmount = (left: string | null | undefined, right: string | null | undefined) => {
@@ -23,7 +24,8 @@ function equivalent(left: SupplierCandidate, right: SupplierCandidate): boolean 
   return equalAmount(left.row.newPrice, right.row.newPrice)
     && equalAmount(compareAt(left), compareAt(right))
     && equalAmount(left.row.newInventoryQty, right.row.newInventoryQty)
-    && currenciesAgree([left.outputCurrency, right.outputCurrency].filter(unit => unit !== undefined));
+    && currenciesAgree([left.outputCurrency, right.outputCurrency].filter(unit => unit !== undefined))
+    && equalAmount(left.bomCost, right.bomCost);
 }
 
 export function chooseSupplier(
@@ -32,7 +34,7 @@ export function chooseSupplier(
   const first = candidates[0];
   if (candidates.length === 1) return { winner: first, conflict: false };
   const comparisonCurrencyAgrees = currenciesAgree(candidates.flatMap(({ currency }) => currency));
-  const invalid = candidates.some(({ invalid, amount }) => invalid || amount === null || amount.units <= 0n);
+  const invalid = candidates.some(({ invalid, amount, bomCost }) => invalid || amount === null || amount.units < 0n || amount.units === 0n && bomCost !== '0.00');
   const conflict = invalid || !comparisonCurrencyAgrees ||
     candidates.some((candidate) => !sameAmount(first.amount!, candidate.amount!) || !equivalent(first, candidate));
   if (invalid || (policy === 'block-conflicts' && conflict)) return { winner: null, conflict, code: 'supplier-conflict' };

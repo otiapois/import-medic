@@ -76,7 +76,7 @@ test('Repair editor exposes current field label, controls and visible focus whil
 test('Slash selects loaded Build search, remains literal in a field, and honors the single-character setting', async ({ page, beginProcessing }) => {
   await page.goto('/shopify-price-update-diff', { waitUntil: 'networkidle' });
   beginProcessing();
-  await page.getByRole('button', { name: /Load Synthetic.*Demo/ }).click();
+  await page.getByRole('button', { name: 'Load Synthetic Agency Demo', exact: true }).click();
   const search = page.getByRole('searchbox', { name: 'Search by SKU or Handle' });
   await expect(search).toBeVisible();
   const origin = page.getByRole('link', { name: 'ImportMedic', exact: true });
