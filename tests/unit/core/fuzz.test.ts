@@ -23,6 +23,7 @@ import { guardSpreadsheetCell } from '../../../src/core/formula-guard';
 import { buildInventorySync } from '../../../src/core/inventory-sync/engine';
 import { buildPromoCampaign, type PromoCampaignOptions } from '../../../src/core/promo-campaign/engine';
 import { buildPurchaseOrder } from '../../../src/core/purchase-order/engine';
+import { reconcilePayouts } from '../../../src/core/reconciliation/payout-matcher';
 import { createBookkeeperSignoffHtml } from '../../../src/core/repair/bookkeeper-signoff';
 import { escapeReportText, offlineReportCsp } from '../../../src/core/report-html';
 import { buildMultiSupplierDiff, buildPriceDiff, parseBaseline, parseSupplier } from '../../../src/core/shopify-price-diff';
@@ -2593,7 +2594,110 @@ describe('M25 Catalog and Barcode Hygiene adversarial cases', () => {
   }, 120_000);
 });
 
-it('accounts for all 50,420 seeded executions without skips', () => {
-  expect(fuzzExecutions).toEqual({ accepted: 50_420, discarded: 0, properties: 79 });
+describe('M26 deterministic payout reconciliation adversaries', () => {
+  type Transaction = { currency: string; cents: bigint; day: number };
+  const day = (value: number) => `2026-11-${String(value + 1).padStart(2, '0')}`;
+  const sample = (payouts: Transaction[], bank: Transaction[], maxLagDays: number) => reconcilePayouts({
+    maxLagDays,
+    payouts: { filename: 'payouts.csv', bytes: csvBytes(['Payout ID', 'Date', 'Net', 'Currency'],
+      payouts.map((row, index) => [String(index).padStart(4, '0'), day(row.day), cents(row.cents), row.currency])) },
+    bank: { filename: 'bank.csv', bytes: csvBytes(['Date', 'Description', 'Amount', 'Currency'],
+      bank.map((row, index) => [day(row.day), index % 3 === 0 ? 'Line one\r\nLine two' : 'Deposit', cents(row.cents), row.currency])) },
+  });
+  const currency = fc.constantFrom('USD', 'EUR', 'GBP');
+  const exactAmounts = fc.constantFrom(1n, 50n, 51n, 25_000n, 25_001n, 300_000n, 306_000n, 9_007_199_254_740_993n);
+  const payouts = fc.array(fc.record({ currency, cents: exactAmounts, day: fc.integer({ min: 0, max: 8 }) }), { maxLength: 12 });
+  const bank = fc.array(fc.record({ currency, cents: fc.oneof(exactAmounts, exactAmounts.map(amount => -amount), fc.constant(0n)),
+    day: fc.integer({ min: 0, max: 20 }) }), { maxLength: 16 });
+
+  it('checks 1,500 independent exact-edge, cent conservation, and near-candidate models with physical lines', async () => {
+    await checkAsyncFuzz(fc.asyncProperty(payouts, bank, fc.integer({ min: 0, max: 10 }), async (payouts, bank, lag) => {
+      const result = await sample(payouts, bank, lag);
+      let bankLine = 2;
+      const payoutRows = payouts.map((row, index) => ({ ...row, line: index + 2 }));
+      const deposits = bank.map((row, index) => {
+        const line = bankLine;
+        bankLine += index % 3 === 0 ? 2 : 1;
+        return { ...row, line };
+      }).filter(row => row.cents > 0n);
+      const eligible = (p: Transaction, b: Transaction) => p.currency === b.currency && b.day >= p.day && b.day <= p.day + lag;
+      const edges = payoutRows.flatMap(p => deposits.flatMap(b => p.cents === b.cents && eligible(p, b) ? [{ p, b }] : []));
+      const isIsolated = ({ p, b }: typeof edges[number]) =>
+        edges.filter(edge => edge.p.line === p.line).length === 1 && edges.filter(edge => edge.b.line === b.line).length === 1;
+      const isolated = edges.filter(isIsolated);
+      const ambiguous = edges.filter(edge => !isIsolated(edge));
+      const unmatchedPayouts = payoutRows.filter(p => !edges.some(edge => edge.p.line === p.line));
+      const unmatchedDeposits = deposits.filter(b => !edges.some(edge => edge.b.line === b.line));
+      expect(result.pairs.map(({ payoutLine, bankLine, currency, amountCents, lagDays }) => [payoutLine, bankLine, currency, amountCents, lagDays]))
+        .toEqual(isolated.map(({ p, b }) => [p.line, b.line, p.currency, p.cents.toString(), b.day - p.day]));
+      expect(new Set(result.pairs.map(pair => pair.bankLine)).size).toBe(result.pairs.length);
+      const tied = result.exceptions.filter(issue => issue.code === 'AMBIGUOUS_TIE');
+      expect(new Set(tied.flatMap(issue => issue.payoutLines))).toEqual(new Set(ambiguous.map(edge => edge.p.line)));
+      expect(new Set(tied.flatMap(issue => issue.bankLines))).toEqual(new Set(ambiguous.map(edge => edge.b.line)));
+      for (const tie of tied) for (const group of tie.candidateSets!) {
+        for (const line of group.payoutLines) {
+          expect(new Set(group.bankLines)).toEqual(new Set(ambiguous.filter(edge => edge.p.line === line).map(edge => edge.b.line)));
+        }
+      }
+      const near = unmatchedPayouts.flatMap(p => unmatchedDeposits.flatMap(b => {
+        const delta = b.cents - p.cents;
+        const magnitude = delta < 0n ? -delta : delta;
+        return eligible(p, b) && delta !== 0n && (magnitude <= 2500n || magnitude * 100n <= p.cents * 2n)
+          ? [[p.line, b.line, delta.toString()]] : [];
+      }));
+      const byLines = (a: [number, number, string], b: [number, number, string]) => a[0] - b[0] || a[1] - b[1];
+      expect(result.exceptions.filter(item => item.code === 'UNMATCHED_NEAR_AMOUNT')
+        .flatMap(item => item.payoutLines.flatMap(p => item.bankLines.map(b => [p, b, item.deltaCents!] as const)))
+        .map(([p, b, delta]): [number, number, string] => [p, b, delta]).sort(byLines)).toEqual(near);
+      const sum = (rows: Transaction[], currency: string) =>
+        rows.filter(row => row.currency === currency).reduce((total, row) => total + row.cents, 0n);
+      const matchedPayouts = isolated.map(edge => edge.p);
+      const matchedBank = isolated.map(edge => edge.b);
+      const ambiguousPayouts = payoutRows.filter(p => ambiguous.some(edge => edge.p.line === p.line));
+      const ambiguousBank = deposits.filter(b => ambiguous.some(edge => edge.b.line === b.line));
+      expect(result.summary.byCurrency).toEqual([...new Set([...payoutRows, ...deposits].map(row => row.currency))].map(currency => ({
+        currency, totalPayoutCents: sum(payoutRows, currency).toString(), totalBankInflowCents: sum(deposits, currency).toString(),
+        matchedPayoutCents: sum(matchedPayouts, currency).toString(), matchedBankCents: sum(matchedBank, currency).toString(),
+        unmatchedPayoutCents: sum(unmatchedPayouts, currency).toString(), unmatchedBankCents: sum(unmatchedDeposits, currency).toString(),
+        ambiguousPayoutCents: sum(ambiguousPayouts, currency).toString(), ambiguousBankCents: sum(ambiguousBank, currency).toString(),
+      })));
+      for (const totals of result.summary.byCurrency) {
+        expect(BigInt(totals.totalPayoutCents)).toBe(BigInt(totals.matchedPayoutCents) + BigInt(totals.unmatchedPayoutCents) + BigInt(totals.ambiguousPayoutCents));
+        expect(BigInt(totals.totalBankInflowCents)).toBe(BigInt(totals.matchedBankCents) + BigInt(totals.unmatchedBankCents) + BigInt(totals.ambiguousBankCents));
+      }
+    }), { seed: seed + 2601, numRuns: 1500 });
+  }, 120_000);
+
+  it('checks 1,000 single-cent tamper cases through both bank and payout accounting', async () => {
+    await checkAsyncFuzz(fc.asyncProperty(fc.bigInt({ min: 2n, max: 10n ** 20n }), currency,
+      fc.constantFrom(-1n, 1n), fc.integer({ min: 0, max: 10 }), async (amount, currency, delta, lag) => {
+        const result = await sample([{ currency, cents: amount, day: 0 }], [
+          { currency, cents: amount + delta, day: lag },
+          { currency: currency === 'USD' ? 'EUR' : 'USD', cents: amount, day: lag },
+        ], lag);
+        expect(result.status).toBe('HOLD');
+        expect(result.pairs).toEqual([]);
+        expect(result.exceptions.filter(issue => issue.code === 'UNMATCHED_NEAR_AMOUNT')).toEqual([
+          expect.objectContaining({ currency, payoutLines: [2], bankLines: [2], deltaCents: delta.toString(), lagDays: lag }),
+        ]);
+        const contradicted = await reconcilePayouts({
+          maxLagDays: lag,
+          payouts: { filename: 'payouts.csv', bytes: csvBytes(['Payout ID', 'Date', 'Net', 'Gross', 'Fees', 'Currency'],
+            [['0001', day(0), cents(amount + delta), cents(amount + 1n), '0.01', currency]]) },
+          bank: { filename: 'bank.csv', bytes: csvBytes(['Date', 'Description', 'Amount', 'Currency'],
+            [[day(lag), 'Transfer', cents(amount + delta), currency]]) },
+        });
+        expect(contradicted.pairs).toEqual([]);
+        expect(contradicted.summary.byCurrency[0].unmatchedPayoutCents).toBe((amount + delta).toString());
+        expect(contradicted.exceptions[0]).toMatchObject({
+          code: 'PAYOUT_TOTAL_MISMATCH', payoutLines: [2], expectedCents: amount.toString(),
+          actualCents: (amount + delta).toString(), deltaCents: delta.toString(),
+        });
+      }), { seed: seed + 2602, numRuns: 1000 });
+  }, 120_000);
+});
+
+it('accounts for all 52,920 seeded executions without skips', () => {
+  expect(fuzzExecutions).toEqual({ accepted: 52_920, discarded: 0, properties: 81 });
   console.info(`Deterministic fuzz: ${fuzzExecutions.accepted} accepted, ${fuzzExecutions.discarded} discarded across ${fuzzExecutions.properties} properties.`);
 });

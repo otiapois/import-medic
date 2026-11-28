@@ -43,7 +43,7 @@ const DEFAULT_OPTIONS: Record<PlatformId, RepairOptions> = {
 
 export type SourceFile = { filename: string } & ({ sample: true; bytes: Uint8Array } | { sample: false; file: File });
 
-export function Workbench({ initialPlatform, showCategorization }: { initialPlatform: PlatformId; showCategorization: boolean }) {
+export function Workbench({ initialPlatform, accountingHome = false }: { initialPlatform: PlatformId; accountingHome?: boolean }) {
   const { branding } = useSignoffBranding();
   const id = useId();
   const [platform, setPlatform] = useState(initialPlatform);
@@ -143,7 +143,7 @@ export function Workbench({ initialPlatform, showCategorization }: { initialPlat
   return (
     <section className="workbench" aria-label="CSV repair workbench">
       <div className="workbench-input">
-        <ModeNavigation current="repair" />
+        {accountingHome ? null : <ModeNavigation current="repair" />}
         <div className="workbench-platforms">
           <h2>Choose a platform</h2>
           <TabBar
@@ -337,7 +337,7 @@ export function Workbench({ initialPlatform, showCategorization }: { initialPlat
           {edits.length ? <p className="field-help">Browser cell corrections stay in this session. Apply those corrections to a local copy of the source before replaying it.</p> : null}
         </LocalCliCommand>
       </div>
-      {showCategorization ? (
+      {accountingHome ? (
         <details className="categorization-drawer" onToggle={(event) => {
           if (event.target === event.currentTarget && event.currentTarget.open) setCategorizationOpened(true);
         }}>

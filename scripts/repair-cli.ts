@@ -115,6 +115,7 @@ const modeFlags = {
   categorize: ['rules', 'currency', 'credit-debit-convention', 'workspace-profile'],
   'wholesale-sheet': ['platform', 'baseline', 'options', 'cost-sheet', 'cost-sheet-tab', 'cost-sheet-tab-b64', 'workspace-profile'],
   'catalog-hygiene': ['platform', 'source', 'second', 'second-platform', 'trim-skus', 'strip-zero-width', 'workspace-profile'],
+  'reconcile-payouts': ['payouts', 'bank', 'max-lag-days', 'payout-currency', 'bank-currency', 'workspace-profile'],
   migrate: ['source-platform', 'target-platform'],
 };
 const booleanFlags = new Set(['help', 'exclude-paypal-memo', 'formula-guard', ...checks.map(check => `confirm-${check}`),
@@ -137,6 +138,7 @@ const modeUsage = {
   categorize: '<input.csv> --rules <json> [--currency <ISO>] [--credit-debit-convention <bank|intuit>] [--workspace-profile <json>]',
   'wholesale-sheet': '--platform <store> --baseline <csv> --options <json> [--cost-sheet <csv|xlsx>] [--cost-sheet-tab <name>] [--workspace-profile <json>]',
   'catalog-hygiene': '--platform <store> --source <csv> [--second <csv> [--second-platform <store>]] [--trim-skus] [--strip-zero-width] [--workspace-profile <json>]',
+  'reconcile-payouts': '--payouts <csv> --bank <csv> [--max-lag-days <0..10>] [--payout-currency <ISO>] [--bank-currency <ISO>] [--workspace-profile <json>]',
   migrate: '--source-platform <store> --target-platform <store> <input.csv>',
 };
 
@@ -500,6 +502,18 @@ async function explicitMain(args: string[]) {
       if (profile && !profile.ok) throw new Error(profile.diagnostics.map(({ message }) => message).join('\n'));
       request = { mode, sources: [{ ...primary, platform }, ...(second ? [{ ...second, platform: secondPlatform ?? platform }] : [])],
         options: { trimSkus: flag('trim-skus'), stripZeroWidth: flag('strip-zero-width'), branding: profile?.value.branding, workspaceProfile } };
+      break;
+    }
+    case 'reconcile-payouts': {
+      const lag = option('max-lag-days');
+      if (lag !== undefined && !/^(?:[0-9]|10)$/.test(lag)) throw new Error('Choose --max-lag-days as an integer from 0 to 10.');
+      const payouts = source('payouts');
+      const bank = source('bank');
+      const profilePath = option('workspace-profile');
+      const profile = profilePath === undefined ? undefined : parseWorkspaceProfile(read('workspace-profile', profilePath, /\.json$/i).bytes);
+      if (profile && !profile.ok) throw new Error(profile.diagnostics.map(({ message }) => message).join('\n'));
+      request = { mode, payouts, bank, maxLagDays: lag === undefined ? undefined : Number(lag),
+        payoutCurrency: option('payout-currency'), bankCurrency: option('bank-currency'), branding: profile?.value.branding };
       break;
     }
   }

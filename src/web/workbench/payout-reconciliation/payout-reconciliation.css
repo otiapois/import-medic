@@ -1,0 +1,55 @@
+.payout-reconciler { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+.payout-heading { align-items: flex-start; }
+.payout-heading > div { flex: 1 1 22rem; }
+.payout-heading > button { max-width: 100%; }
+.payout-sources { margin-top: 0; }
+.payout-sources .price-file { background: var(--canvas); }
+.payout-sources .drop-zone { background: var(--surface); }
+.payout-sources .drop-zone[data-dragging='true'] { background: var(--teal-soft); }
+.payout-currency { display: grid; gap: 4px; justify-items: start; margin-top: 10px; color: var(--ink); font-weight: 650; font-size: .875rem; }
+.payout-currency input, .payout-lag-settings select {
+  min-height: 42px;
+  padding: 6px 9px;
+  border: 1px solid var(--control-line);
+  border-radius: 7px;
+  background: var(--surface);
+  color: var(--ink);
+}
+.payout-currency input { width: 8rem; max-width: 100%; text-transform: uppercase; }
+.payout-currency input::placeholder { color: var(--muted); opacity: 1; text-transform: none; }
+.payout-lag-settings { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.payout-lag-settings .price-sheet { display: block; margin-top: 0; width: auto; }
+.payout-lag-settings select { min-width: 4rem; }
+.payout-lag-settings .field-help { flex-basis: 100%; margin-top: 0; }
+.payout-review { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; padding-top: 14px; border-top: 1px solid var(--line); }
+.payout-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
+.payout-kpis > div { min-width: 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--canvas); }
+.payout-kpis dt { color: var(--muted); font-size: .84rem; font-weight: 650; }
+.payout-kpis dd { margin-top: 2px; font-size: 1.22rem; font-weight: 720; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.payout-reconciled-amounts { margin: 0; padding: 0; list-style: none; font-size: 1rem; }
+.payout-reconciled-amounts li + li { margin-top: 2px; }
+.payout-ledgers { align-items: start; }
+.payout-preview .pagination { margin: 0; padding: 8px; border-top: 1px solid var(--line); }
+.payout-preview .table-scroll th, .payout-preview .table-scroll td { vertical-align: top; }
+.payout-preview .table-scroll tbody th { text-align: start; }
+.payout-preview .payout-pairs-table { min-width: max(100%, 25rem); }
+.payout-preview .payout-exceptions-table { min-width: max(100%, 26rem); }
+.payout-table-meta { display: block; margin-top: 3px; color: var(--muted); font-size: .75rem; font-weight: 500; }
+.payout-bank-description { display: block; max-width: 15rem; overflow-wrap: anywhere; white-space: pre-wrap; }
+.payout-preview .table-scroll .payout-table-meta { max-width: 21ch; }
+.payout-exception-message { overflow-wrap: anywhere; }
+.payout-preview .payout-source-lines { min-width: 4.2rem; max-width: 11rem; }
+.payout-amount, .payout-number { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.payout-currency-totals { border: 1px solid var(--line); border-radius: 9px; }
+.payout-currency-totals > summary { min-height: 42px; padding: 9px 11px; color: var(--teal-strong); font-weight: 670; }
+.payout-currency-totals .table-scroll { border-top: 1px solid var(--line); }
+.payout-currency-totals .table-scroll thead th { position: static; }
+.payout-downloads { display: grid; gap: 8px; }
+.payout-downloads h4 { font-size: .95rem; font-weight: 720; }
+.payout-downloads .export-warning { margin: 0; }
+
+@media (max-width: 620px) {
+  .payout-ledgers { grid-template-columns: minmax(0, 1fr); }
+  .payout-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .payout-downloads .export-buttons { display: grid; grid-template-columns: minmax(0, 1fr); }
+}

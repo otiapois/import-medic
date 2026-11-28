@@ -16,7 +16,7 @@ Every explicit mode needs `--mode <mode>` and `--out-dir <dir>`. Choose a new or
 | Exit | Meaning | Files |
 | --- | --- | --- |
 | `0` | The run completed and passed its local checks. `verify` reports `PASS`. A price diff or inventory sync with no changes can pass without a native pair. | Available mode outputs and `custody-manifest.json` |
-| `2` | The run completed with a hold or unsafe result. `verify` reports `FAIL_UNSAFE`. | Diagnostic JSON, `custody-manifest.json`, and any mode-specific review HTML or diagnostic CSV. Native and other work product CSVs are withheld. |
+| `2` | The run completed with a hold, unsafe result, or reconciliation exceptions. `verify` reports `FAIL_UNSAFE`. | The manifest and mode-specific review files. Native import files are withheld on a hold. Payout reconciliation also leaves the individually proven pairs for review. |
 | `1` | Usage, filesystem, or execution error. | Read stderr and treat the run as failed. A completed batch receipt is unavailable. |
 
 A completed explicit batch with exit `0` or `2` writes one JSON line to stdout with `mode`, `status`, `exitCode`, and `outputs`, an array of the output filenames including the manifest. Use `npm run --silent repair-cli -- …` to suppress npm's script banner. `verify` uses `PASS` or `FAIL_UNSAFE`. The other modes use `ready` or `blocked`, with `no-changes` for a valid price diff or inventory sync that would leave the relevant quantities or catalog cells unchanged. A help invocation prints usage text.
@@ -269,6 +269,26 @@ npm run --silent repair-cli -- --mode catalog-hygiene --platform shopify --sourc
 The first command exits `0`. In source 1's cleaned CSV, compare line 2's SKU `AURORA-01` and UPC-A `012345678905` with the source. Verify the source 1 rollback is byte-identical to the original CSV. The second command exits `2`. Line 2 carries `4006381333932`, with supplied check digit `2` and expected `1`. Compare the case-variant SKU at lines 2 and 5 and the barcode collision at lines 5 and 6. The third command exits `2`. Review the SKU collision at physical line 2 in each input.
 
 Each completed run writes `catalog-hygiene-issues.csv`, `catalog-hygiene-audit.json`, `catalog-hygiene-report.html`, and `custody-manifest.json`. Ready runs add `catalog-hygiene-source-<N>-cleaned.csv` and `catalog-hygiene-source-<N>-rollback.csv` for the available sources. On exit `2`, confirm that both kinds of native catalog files are withheld for every source. Check the manifest's input roles `source`, `second` and `workspace-profile` for the files supplied, its diagnostic roles `issues-csv`, `audit-json`, and `report-html`, and its ready output roles `source-<N>-cleaned-csv` and `source-<N>-rollback-csv`. [Catalog checks and file contract](catalog-hygiene.md)
+
+## reconcile-payouts
+
+Supply `--payouts <csv>` as the prepared payout summary and `--bank <csv>` as the signed bank statement. Both paths and `--out-dir <dir>` are required.
+
+| Flag | Use |
+| --- | --- |
+| `--max-lag-days <0–10>` | Latest allowed bank date in calendar days after the payout date, inclusive. Defaults to `5`. Both dates may be the same day. |
+| `--payout-currency <CODE>` | Actual currency of the whole payout file, when it has no currency header. |
+| `--bank-currency <CODE>` | Actual currency of the whole bank file, when it has no currency header. |
+| `--workspace-profile <json>` | Optional saved Workspace Profile for offline sign-off branding. |
+
+```sh
+npm run --silent repair-cli -- --mode reconcile-payouts --payouts fixtures/m26/shopify-payouts.csv --bank fixtures/m26/bank-matched.csv --max-lag-days 5 --out-dir ./batches/payout-demo
+npm run --silent repair-cli -- --mode reconcile-payouts --payouts fixtures/m26/shopify-payouts.csv --bank fixtures/m26/bank-fee.csv --out-dir ./batches/payout-review
+```
+
+The first command exits `0` with three exact pairs totaling `207.55 USD` and `210.00 EUR`. The second exits `2`. Compare the first USD payout with the bank's one-cent-short deposit in `payout-exceptions.csv`. The other independently proven pairs remain in the pairs CSV. Repeat with `bank-missing.csv` and `bank-ambiguous.csv`, using a separate output directory for each run, to check the missing deposit and tied candidate lines.
+
+Both exit codes retain `payout-reconciled-pairs.csv`, `payout-exceptions.csv`, `payout-reconciliation-audit.json`, `payout-reconciliation-sign-off.html`, and `custody-manifest.json`. The pairs CSV can contain only the header when no pair is provable. The two CSVs are review files. Compare the original input and emitted artifact hashes before resaving. [Payout inputs, matching rules, and output contract](payout-reconciliation.md)
 
 ## Legacy single-file repair
 

@@ -32,6 +32,8 @@ const categorizeSpawnTimeout = 40_000;
 const categorizeTestTimeout = 160_000;
 const hygieneSpawnTimeout = 40_000;
 const hygieneTestTimeout = 100_000;
+const reconciliationSpawnTimeout = 40_000;
+const reconciliationTestTimeout = 120_000;
 let scratch: string;
 
 beforeAll(() => {
@@ -81,13 +83,68 @@ function verifyReceipt(mode: string, code: 0 | 2, status: string, directory: str
   expect(roles.size).toBe(outputFiles.length);
   for (const { role, filename } of manifest.outputs) expect(manifest.outputs.find((file: { role: string }) => file.role === role))
     .toEqual(fingerprint(role, resolve(outputPath, filename)));
-  if (code === 2) expect(outputFiles.filter(file => file.endsWith('.csv')))
-    .toEqual(mode === 'catalog-hygiene' ? ['catalog-hygiene-issues.csv'] : []);
+  if (code === 2) {
+    const reviewCsvs = mode === 'catalog-hygiene' ? ['catalog-hygiene-issues.csv']
+      : mode === 'reconcile-payouts' ? ['payout-reconciled-pairs.csv', 'payout-exceptions.csv'] : [];
+    expect(outputFiles.filter(file => file.endsWith('.csv'))).toEqual(reviewCsvs);
+  }
   return run;
 }
 
 const pricingHeaders = 'Handle,Title,Option1 Name,Option1 Value,Variant SKU,Variant Price,Variant Compare At Price,Cost per item\n';
 const catalog = (price: string) => pricingHeaders + `part,Spare Part,Title,Default Title,0001,${price},,5.00\nkit,Bundle,Title,Default Title,KIT,20.00,,10.00\n`;
+
+describe('M26 reconcile-payouts CLI subprocess', () => {
+  const files = ['payout-reconciled-pairs.csv', 'payout-exceptions.csv', 'payout-reconciliation-audit.json',
+    'payout-reconciliation-sign-off.html'];
+  const [pairsName, exceptionsName, auditName, htmlName] = files;
+  const payouts = fixture('m26/shopify-payouts.csv');
+  const cases = [
+    ['matched', 0, 3, []],
+    ['missing', 2, 2, ['UNMATCHED_PAYOUT']],
+    ['ambiguous', 2, 2, ['AMBIGUOUS_TIE']],
+    ['fee', 2, 2, ['UNMATCHED_PAYOUT', 'UNMATCHED_BANK_DEPOSIT', 'UNMATCHED_NEAR_AMOUNT']],
+  ] as const;
+  it.each(cases)('keeps four report files and validates the %s receipt', (scenario, code, pairs, issues) => {
+    const bank = fixture(`m26/bank-${scenario}.csv`);
+    const output = resolve(scratch, 'm26-' + scenario);
+    verifyReceipt('reconcile-payouts', code, code === 0 ? 'ready' : 'blocked', output,
+      ['--payouts', payouts, '--bank', bank, '--max-lag-days', '5'], { payouts, bank }, files, undefined, reconciliationSpawnTimeout);
+    const reports = (name: string) => readFileSync(resolve(output, name));
+    expect(parseCsv(reports(pairsName).toString('utf8')).records).toHaveLength(pairs + 1);
+    const rows = parseCsv(reports(exceptionsName).toString('utf8')).records.slice(1);
+    expect(rows.map(({ cells }) => cells[0])).toEqual(issues);
+    const audit = JSON.parse(reports(auditName).toString('utf8'));
+    expect(audit.custody.inputs.payouts.sha256).toBe(digest(readFileSync(payouts)));
+    expect(audit.custody.inputs.bank.sha256).toBe(digest(readFileSync(bank)));
+    expect(audit.custody.outputs.pairsCsv.sha256).toBe(digest(reports(pairsName)));
+    expect(audit.custody.outputs.exceptionsCsv.sha256).toBe(digest(reports(exceptionsName)));
+    expect(audit.custody.outputs.signoffHtml.sha256).toBe(digest(reports(htmlName)));
+    if (scenario === 'fee') expect(audit.exceptions.at(-1)).toMatchObject({ payoutLines: [2], bankLines: [2], deltaCents: '-1' });
+  }, reconciliationTestTimeout);
+
+  it('honors separately specified currencies and Workspace Profile branding, including a header-only held ledger', () => {
+    const payouts = content('no-payout-currency.csv', 'Payout ID,Payout Date,Net Payout Amount\n00001,2026-11-01,1.00');
+    const bank = content('no-bank-currency.csv', 'Bank Date,Description,Amount\n2026-11-01,Bank,1.00');
+    const profile = content('payout-branding.json', serializeWorkspaceProfile({
+      version: 1, storeName: 'Northstar', platform: 'shopify', storeCurrency: 'EUR',
+      branding: { agencyName: 'North & Co', preparedFor: '', contactNote: '', accentKey: 'navy' },
+    }));
+    const inputs = { payouts, bank, 'workspace-profile': profile };
+    const args = ['--payouts', payouts, '--bank', bank, '--max-lag-days', '0', '--workspace-profile', profile, '--payout-currency', 'USD'];
+    const held = resolve(scratch, 'm26-missing-currency');
+    verifyReceipt('reconcile-payouts', 2, 'blocked', held, args, inputs, files, undefined, reconciliationSpawnTimeout);
+    expect(parseCsv(readFileSync(resolve(held, pairsName), 'utf8')).records).toHaveLength(1);
+    const confirmed = resolve(scratch, 'm26-confirmed-currency');
+    verifyReceipt('reconcile-payouts', 0, 'ready', confirmed, [...args, '--bank-currency', 'USD'], inputs,
+      files, undefined, reconciliationSpawnTimeout);
+    expect(readFileSync(resolve(confirmed, htmlName), 'utf8')).toContain('North &amp; Co');
+    const invalid = cli(['--mode', 'reconcile-payouts', '--payouts', payouts, '--bank', bank, '--max-lag-days', '11',
+      '--out-dir', resolve(scratch, 'm26-invalid-lag')], root, reconciliationSpawnTimeout);
+    expect(invalid.status).toBe(1);
+    expect(invalid.stderr).toMatch(/max-lag-days.*0 to 10/i);
+  }, reconciliationTestTimeout);
+});
 
 describe('M25 catalog-hygiene CLI subprocess', () => {
   const reports = ['catalog-hygiene-issues.csv', 'catalog-hygiene-audit.json', 'catalog-hygiene-report.html'];

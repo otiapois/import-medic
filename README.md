@@ -22,6 +22,8 @@ ImportMedic compares a Shopify, WooCommerce, or legacy BigCommerce product expor
 
 **Auto-Categorize Rules** applies saved account and tax rules to a local transaction CSV. Review coverage and signed inclusive-tax splits, then download the categorized rows, account summary, audit, and offline sign-off for review.
 
+**Payout vs Bank Reconciler** compares a prepared platform payout summary with the bank's posted deposits in the home Accounting Workbench. Review exact pairs and gaps by currency, then download the pairs, exception queue, audit, and branded offline sign-off.
+
 ## Run locally
 
 Use Node.js 24 and its bundled npm.
@@ -218,6 +220,12 @@ Use **Download Bookkeeper Sign-Off (.html)** to open or print the standalone rep
 
 These CSVs are for bookkeeping review. Confirm the codes and rates against your chart of accounts and the transaction records, then use your accounting software's applicable import workflow. [Supported transaction inputs, rule pack, and output contract](docs/subsystems/categorization.md)
 
+### Reconcile platform payouts against bank deposits
+
+1. On `/`, open **Payout vs Bank Reconciler** and select **Load Synthetic Month-End Shopify Payout vs Bank Demo** or choose the two local CSVs. Prepare the platform summary with one completed payout per row and the actual net amount. Use the bank's posted date and signed amount, with deposits positive. Supply currency on both sources. If a file has no currency column, confirm its actual single currency before using a default for that file. Both values for any match must be the same currency.
+2. Set **Settlement lag window (days)** to 0–10 calendar days, with 5 as the default. A bank deposit may post on the payout date through the last day of the window, inclusive. A match requires exact cents. When several exact candidates are connected across the two sources, the entire group stays in review even if a reference agrees. Review the physical lines, missing rows, and near amounts, including a one-cent shortfall.
+3. Review the matched, unmatched, and ambiguous amounts separately for each currency. Download the **Reconciled Pairs CSV**, **Exceptions CSV**, **Audit JSON**, and branded offline **Month-End Sign-Off**. A run with exceptions can still include independently proven pairs. Keep the files for review and compare the SHA-256 fingerprints before resaving them. [Supported inputs, matching rules, and output files](docs/subsystems/payout-reconciliation.md)
+
 ### Verify file fingerprints
 
 Use **SHA-256 file fingerprints** in the price workbench to compare the baseline, supplier files, optional BOM, and available update and rollback CSVs with the JSON audit or Client Sign-Off HTML. An explicit XLSX worksheet selection is recorded alongside the original whole-workbook fingerprint. The single-file repair shows the source and available repaired CSV fingerprints with the same values in its JSON audit and Bookkeeper Sign-Off HTML. Hash the original files and the downloads before resaving them in a spreadsheet editor. A digest match verifies that the file bytes match the recorded fingerprint. Keep the audit or report with the files it references.
@@ -230,7 +238,7 @@ From the source checkout with its locked dependencies installed, use `npm run --
 npm run --silent repair-cli -- --mode repair --platform xero-bank fixtures/xero-bank/balance-verified.csv --out-dir ./batches/xero-demo
 ```
 
-Use a separate output directory for each run. All twelve explicit modes write `custody-manifest.json` alongside their available results.
+Use a separate output directory for each run. All thirteen explicit modes write `custody-manifest.json` alongside their available results.
 
 | Mode | Use it to prepare |
 | --- | --- |
@@ -246,8 +254,9 @@ Use a separate output directory for each run. All twelve explicit modes write `c
 | `categorize` | A categorized transaction CSV, a per-currency account summary, a JSON audit, and offline Bookkeeper Categorization Sign-Off |
 | `wholesale-sheet` | A buyer matrix CSV, printable buyer HTML, a selected-tier Shopify catalog CSV, and separate internal margin files |
 | `catalog-hygiene` | Catalog diagnostics and branded offline HTML, plus one cleaned catalog and original-byte rollback per source when the batch passes |
+| `reconcile-payouts` | Individually proven payout-to-deposit pairs, exceptions, a JSON audit, and branded offline Month-End Sign-Off for review |
 
-Exit `0` means the local run passed. Exit `2` means the run held the CSV or rejected the candidate and left diagnostic files. Exit `1` means an argument, input/output, or execution error. The unsigned manifest lists the SHA-256 of the original input bytes and each emitted result. Keep it with the originals and outputs to check for byte changes.
+Exit `0` means the local run passed. Exit `2` means a hold, rejected candidate, or reconciliation with exceptions. The available files remain in the batch directory for review. Exit `1` means an argument, input/output, or execution error. The unsigned manifest lists the SHA-256 of the original input bytes and each emitted result. Keep it with the originals and outputs to check for byte changes.
 
 Pass a saved Supplier Recipe JSON to `price-diff` with its supplier file. Review the current mapping, worksheet, and any currency or conflict settings before confirming them for this batch. For earlier single-file scripts, omitting `--mode` preserves `--platform`, the CSV stream on stdout or `--output`, and the optional `--audit` JSON. [CLI commands, options, and exit codes](docs/subsystems/cli-automation.md)
 
@@ -260,6 +269,8 @@ For a bookkeeping review batch, use `--mode categorize` with a transaction CSV a
 For a wholesale batch, use `--mode wholesale-sheet` with a catalog CSV, tier options, and optional landed cost and MAP input. Check the audit and custody manifest for a hold or compare the ready outputs byte for byte with their reported hashes. [Runnable wholesale and hold examples](docs/subsystems/cli-automation.md#wholesale-sheet)
 
 For a catalog audit, use `--mode catalog-hygiene` with `--platform` and `--source`. Add a second catalog to compare identities across the files. Check the source lines and available output hashes before using the results. [Runnable catalog hygiene and hold examples](docs/subsystems/cli-automation.md#catalog-hygiene)
+
+For month-end reconciliation, use `--mode reconcile-payouts --payouts <csv> --bank <csv>`. Check the lag and currency settings against the supplied files. Exit `0` means every eligible payout and incoming bank deposit reconciled with zero exceptions. Exit `2` keeps the pairs CSV, exception queue, JSON audit, offline sign-off, and custody manifest for review. [Runnable clean and exception examples](docs/subsystems/cli-automation.md#reconcile-payouts)
 
 ## Verify local processing
 

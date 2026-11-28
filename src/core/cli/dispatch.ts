@@ -10,6 +10,7 @@ import { buildCatalogMigration } from '../catalog-migrator/engine';
 import { buildCostCreep, costCreepFilenames, type CostCreepOptions, type CostCreepPeriod } from '../cost-creep/engine';
 import { buildPromoCampaign, type PromoCampaignOptions } from '../promo-campaign';
 import { buildPurchaseOrder, type PurchaseOrderOptions, type PurchaseOrderSupplier } from '../purchase-order/engine';
+import { reconcilePayouts, type ReconciliationInput } from '../reconciliation/payout-matcher';
 import { createBookkeeperSignoffHtml } from '../repair/bookkeeper-signoff';
 import { parseBaseline, parseSupplier, suggestColumns, type ColumnSelection, type RowResolution, type SupplierDiffInput } from '../shopify-price-diff';
 import { applySupplierRecipe, parseSupplierRecipe } from '../shopify-price-diff/recipe';
@@ -24,7 +25,7 @@ import { runPriceComparison } from '../whatif/simulator';
 import type { SignoffBrand } from '../branding/signoff-brand';
 import { buildWholesalePriceList, type WholesaleOptions } from '../wholesale-pricelist/engine';
 
-export const cliModes = ['repair', 'price-diff', 'verify', 'promo', 'supplier-delta', 'migrate', 'inventory-sync', 'cost-creep', 'purchase-order', 'categorize', 'wholesale-sheet', 'catalog-hygiene'] as const;
+export const cliModes = ['repair', 'price-diff', 'verify', 'promo', 'supplier-delta', 'migrate', 'inventory-sync', 'cost-creep', 'purchase-order', 'categorize', 'wholesale-sheet', 'catalog-hygiene', 'reconcile-payouts'] as const;
 export const storePlatforms = ['shopify', 'woocommerce', 'bigcommerce'] as const satisfies readonly StorePlatform[];
 export const importPlatforms = [...storePlatforms, 'amazon'] as const satisfies readonly ImportPlatform[];
 export type CliMode = typeof cliModes[number];
@@ -69,6 +70,7 @@ export type CliRequest =
   | { mode: 'purchase-order'; baseline: CliFile; suppliers: readonly PurchaseOrderSupplier[]; options?: PurchaseOrderOptions }
   | { mode: 'wholesale-sheet'; platform: StorePlatform; baseline: CliFile; options: WholesaleOptions; branding?: SignoffBrand }
   | { mode: 'catalog-hygiene'; sources: readonly CatalogHygieneSource[]; options?: CatalogHygieneOptions }
+  | ({ mode: 'reconcile-payouts' } & ReconciliationInput)
   | ({ mode: 'categorize' } & CategorizationInput)
   | { mode: 'migrate'; source: CliFile; sourcePlatform: StorePlatform; targetPlatform: StorePlatform };
 
@@ -273,6 +275,12 @@ export async function dispatchCli(request: CliRequest): Promise<CliResult> {
           { role: 'source-' + sourceIndex + '-cleaned-csv', ...cleanedCsv },
           { role: 'source-' + sourceIndex + '-rollback-csv', ...rollbackCsv },
         ]));
+    }
+    case 'reconcile-payouts': {
+      const { status, artifacts: { pairsCsv, exceptionsCsv, auditJson, signoffHtml } } = await reconcilePayouts(request);
+      return result(status === 'READY' ? 'ready' : 'blocked', { role: 'reconciled-pairs-csv', ...pairsCsv },
+        { role: 'exceptions-csv', ...exceptionsCsv }, { role: 'audit-json', ...auditJson },
+        { role: 'sign-off-html', ...signoffHtml });
     }
     case 'supplier-delta': return supplierDelta(request.previous, request.next);
     case 'cost-creep': {

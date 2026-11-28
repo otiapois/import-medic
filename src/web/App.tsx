@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
+import { AccountingWorkbench } from './AccountingWorkbench';
 import { Workbench } from './Workbench';
 import { PriceDiffWorkbench } from './workbench/PriceDiffWorkbench';
 import { SignoffBrandingProvider } from './workbench/SignoffBranding';
@@ -64,7 +65,9 @@ export function App({ page }: { page: Page }) {
           <p>{page.description}</p>
         </div>
         <SignoffBrandingProvider>
-          {priceStudio ? <PriceDiffWorkbench characterKeys={characterKeys} /> : <Workbench initialPlatform={page.platform} showCategorization={page.path === '/'} />}
+          {priceStudio ? <PriceDiffWorkbench characterKeys={characterKeys} />
+            : page.path === '/' ? <AccountingWorkbench initialPlatform={page.platform} />
+            : <Workbench initialPlatform={page.platform} />}
         </SignoffBrandingProvider>
         <div className="site-guidance">
           <section aria-labelledby="examples-heading">

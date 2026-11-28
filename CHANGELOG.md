@@ -1,5 +1,11 @@
 # Changelog
 
+## v2.6.0 (M26)
+
+- Open **Payout vs Bank Reconciler** in the Accounting Workbench to compare one row per completed platform payout with bank deposits. Match in exact cents, in the same currency, on or after the payout date. Choose an inclusive window of 0 to 10 calendar days, with 5 days as the default.
+- Review missing deposits, small amount differences, and all physical lines in each connected group of competing exact matches. References remain visible for review. Totals reconcile separately for each currency and source.
+- Download the individually proven pairs and exception queue as review CSVs, a SHA-256 audit, and a branded offline Month-End Payout Reconciliation Sign-Off. Run the same checks with `repair-cli --mode reconcile-payouts`. Exit `2` keeps all review files and the custody manifest available.
+
 ## v2.5.0 (M25)
 
 - Open **Verify Update / Rollback CSV > Catalog & Barcode Hygiene** to audit a Shopify, WooCommerce, or legacy BigCommerce catalog CSV. Add a second catalog to find collisions across both files. Review source lines, conflicting SKUs, and the supplied and expected digits for GS1 checksum failures.
