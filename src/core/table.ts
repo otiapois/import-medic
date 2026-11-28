@@ -20,6 +20,7 @@ export function canonicalHeader(header: string, aliases: HeaderAliases): string 
 export interface WorkingRow {
   source: CsvRecord;
   cells: string[];
+  cellsBeforePunctuation?: string[];
   after: string[];
   invalid: boolean;
 }
@@ -100,6 +101,7 @@ export function readTable(
         invalid = true;
       }
     }
+    let cellsBeforePunctuation: string[] | undefined;
     if (!invalid) {
       for (const [index, value] of editsByRow.get(line) ?? []) {
         if (cells[index] === value) continue;
@@ -107,13 +109,14 @@ export function readTable(
         cells[index] = value;
       }
       if (fixWindowsPunctuation) {
+        cellsBeforePunctuation = cells.slice();
         cells.forEach((value, index) => {
           const fixed = value.replace(/[‘’“”–— ]/g, (character) => smartPunctuation[character]);
           cells[index] = journal.fix('encoding-repaired', line, headers[index], value, fixed, 'Normalized legacy Windows punctuation.');
         });
       }
     }
-    return { source, cells, after: cells, invalid };
+    return { source, cells, cellsBeforePunctuation, after: cells, invalid };
   });
   return { headers, sourceHeaders, headerLine, rows, positions };
 }

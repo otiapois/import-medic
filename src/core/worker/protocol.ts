@@ -1,10 +1,11 @@
+import type { AmazonPriceResult } from '../amazon-price-diff';
 import type { BatchDiffOptions, ColumnSelection, ColumnSuggestions, DiffIssue, DiffRow, PriceDiffResult, PricingPreview, RowResolution, StorePlatform } from '../shopify-price-diff/types';
 import type { RecipeResult, SupplierRecipe } from '../shopify-price-diff/recipe';
 import type { ManualCellEdit, PlatformId, PreviewRow, RemovedRow, RepairIssue, RepairOptions, RepairResult } from '../types';
 import type { CatalogImpactSummary } from '../analytics/catalog-impact';
 import type { PriceCustody, RepairCustody } from '../audit/custody';
 import type { BomRollup } from '../bom/rollup';
-import type { ImportDiffRow, ImportInspection, ImportInspectionIssue } from '../verify-import/inspector';
+import type { ImportDiffRow, ImportInspection, ImportInspectionIssue, ImportPlatform } from '../verify-import/inspector';
 import type { ShopifyMarket } from '../shopify-price-diff/markets';
 import type { SignoffBrand } from '../branding/signoff-brand';
 import type { WhatIfResult, WhatIfScenario } from '../whatif/simulator';
@@ -26,7 +27,8 @@ export interface GuardSummary {
 interface PageRequest { page: number; pageSize: number }
 export interface WorkerPage<T> { rows: T[]; total: number; page: number }
 export interface WorkerDownload { bytes: ArrayBuffer; filename: string; mime: string }
-export type DownloadFormat = 'price-csv' | 'price-rollback-csv' | 'price-audit-csv' | 'price-audit-json' | 'price-signoff-html' | 'repair-csv' | 'repair-audit-json' | 'repair-audit-txt' | 'repair-bookkeeper-html';
+export type DownloadFormat = 'price-csv' | 'price-rollback-csv' | 'price-audit-csv' | 'price-audit-json' | 'price-signoff-html' |
+  'amazon-update' | 'amazon-rollback' | 'amazon-audit-json' | 'repair-csv' | 'repair-audit-json' | 'repair-audit-txt' | 'repair-bookkeeper-html';
 
 interface SourceMeta { name: string; issues: DiffIssue[]; issueCount: number }
 export interface SheetMeta extends SourceMeta { headers: string[]; rowCount: number }
@@ -51,7 +53,8 @@ export interface DiffSummary extends Pick<PriceDiffResult, 'status' | 'canDownlo
 export type RepairIssueFilter = 'all' | 'review' | 'fixed';
 export interface RowMarks { changed: string[]; review: string[] }
 export interface RepairPreviewRow extends PreviewRow { beforeMarks: RowMarks; afterMarks: RowMarks }
-export interface RepairSummary extends Omit<RepairResult, 'rows' | 'issues' | 'changes' | 'removedRows' | 'repairedCsv' | 'formulaGuard' | 'bookkeeperAmounts' | 'freshBooksTaxes'> {
+export interface RepairSummary extends Omit<RepairResult, 'rows' | 'issues' | 'changes' | 'removedRows' | 'repairedCsv' | 'formulaGuard' |
+  'bookkeeperAmounts' | 'freshBooksTaxes' | 'taxReconciliation' | 'duplicateTransactions'> {
   custody: RepairCustody;
   rowCount: number;
   removedRowCount: number;
@@ -63,9 +66,16 @@ export interface RepairSummary extends Omit<RepairResult, 'rows' | 'issues' | 'c
   suggestions: PlatformSuggestion[];
   beforeHeaderMarks: string[];
   afterHeaderMarks: string[];
+  taxReconciliation?: Omit<NonNullable<RepairResult['taxReconciliation']>, 'mismatches' | 'reasons'>;
+  duplicateTransactions?: Omit<NonNullable<RepairResult['duplicateTransactions']>, 'groups'>;
 }
 
 export interface InspectionSummary extends Omit<ImportInspection, 'rows' | 'issues'> {
+  rowCount: number;
+  issueCount: number;
+}
+
+export interface AmazonPriceSummary extends Pick<AmazonPriceResult, 'status' | 'canDownload' | 'delimiter' | 'fileNames' | 'verification'> {
   rowCount: number;
   issueCount: number;
 }
@@ -88,7 +98,10 @@ interface Operations {
   simulatePrice: [{ scenarios: readonly WhatIfScenario[] }, WhatIfResult[]];
   diffRows: [PageRequest & { filter: DiffFilter; search: string }, WorkerPage<PricePreviewRow>];
   diffIssues: [PageRequest, WorkerPage<DiffIssue>];
-  inspectImport: [{ platform: StorePlatform; baseline: File; candidate: File; pairedUpdate?: File }, InspectionSummary];
+  buildAmazonPriceDiff: [{ baseline: File; proposal: File }, AmazonPriceSummary];
+  amazonPriceRows: [PageRequest, WorkerPage<ImportDiffRow>];
+  amazonPriceIssues: [PageRequest, WorkerPage<ImportInspectionIssue>];
+  inspectImport: [{ platform: ImportPlatform; baseline: File; candidate: File; pairedUpdate?: File }, InspectionSummary];
   inspectionRows: [PageRequest, WorkerPage<ImportDiffRow>];
   inspectionIssues: [PageRequest, WorkerPage<ImportInspectionIssue>];
   loadRepair: [{ file: File | { bytes: Uint8Array; filename: string } }, undefined];
@@ -104,13 +117,14 @@ interface Operations {
 
 type Operation = keyof Operations;
 export type WorkerRequest = { [Type in Operation]: { type: Type } & Operations[Type][0] }[Operation];
-export type ResultScope = 'price' | 'repair' | 'inspection';
+export type ResultScope = 'price' | 'repair' | 'inspection' | 'amazon';
 
 export function invalidatesResult(request: WorkerRequest): ResultScope | undefined {
   switch (request.type) {
     case 'loadBaseline': case 'loadSupplier': case 'removeSupplier': case 'loadBom': case 'removeBom': case 'applyRecipe': case 'invalidatePrice': case 'diff': case 'diffBatch': return 'price';
     case 'loadRepair': case 'repair': return 'repair';
     case 'inspectImport': return 'inspection';
+    case 'buildAmazonPriceDiff': return 'amazon';
   }
 }
 
@@ -119,7 +133,8 @@ export function resultScope(request: WorkerRequest): ResultScope | undefined {
     case 'diff': case 'diffBatch': case 'diffRows': case 'diffIssues': case 'simulatePrice': return 'price';
     case 'repair': case 'repairRows': case 'repairIssues': case 'repairRemoved': return 'repair';
     case 'inspectImport': case 'inspectionRows': case 'inspectionIssues': return 'inspection';
-    case 'download': return request.format.startsWith('price-') ? 'price' : 'repair';
+    case 'buildAmazonPriceDiff': case 'amazonPriceRows': case 'amazonPriceIssues': return 'amazon';
+    case 'download': return request.format.startsWith('amazon-') ? 'amazon' : request.format.startsWith('price-') ? 'price' : 'repair';
   }
 }
 

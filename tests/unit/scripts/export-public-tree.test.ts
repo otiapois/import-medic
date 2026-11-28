@@ -22,6 +22,7 @@ it('exports only public HEAD blobs and leaves an existing export intact', () => 
     expected.set('.gitignore', Buffer.from('.cache/\n'));
     expected.set('scripts/export-public-tree.mjs', readFileSync(new URL('../../../scripts/export-public-tree.mjs', import.meta.url)));
     expected.set('fixtures/sample.xlsx', Buffer.from([0, 255, 13, 10]));
+    expected.set('fixtures/amazon/price-quantity.tsv', Buffer.from('sku\tprice\r\n0001\t10.00\r\n'));
     expected.set('src/core/shopify-price-diff/local-settings.ts', Buffer.from('export const localSettings = true;\n'));
     for (const file of ['recipe.ts', 'workspace-profile.ts', 'settings-validation.ts']) {
       const path = 'src/core/shopify-price-diff/' + file;
@@ -32,7 +33,8 @@ it('exports only public HEAD blobs and leaves an existing export intact', () => 
       writeFileSync(join(repo, path), bytes);
     }
     for (const path of ['docs/research/M1.5/excluded.md', 'docs/tasks/internal.md', 'docs/reports/log.md',
-      'AGENTS.md', 'src/scratch/notes.ts', 'fixtures/operator-local.csv', 'tests/.env']) {
+      'AGENTS.md', 'src/scratch/notes.ts', 'fixtures/operator-local.csv', 'fixtures/amazon/operator-local.tsv',
+      'fixtures/amazon/price-quantity.txt', 'fixtures/other/price-quantity.tsv', 'tests/.env']) {
       mkdirSync(dirname(join(repo, path)), { recursive: true });
       writeFileSync(join(repo, path), 'synthetic exclusion sentinel');
     }

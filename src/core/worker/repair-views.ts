@@ -67,6 +67,7 @@ export function repairAudit(result: RepairResult, options: RepairOptions, custod
     custody: custody && (result.canDownload ? custody : { sourceSha256: custody.sourceSha256 }),
     currencySplit: result.currencySplit, stripePayPalFeeConvention: result.stripePayPalFeeConvention,
     balanceChain: result.balanceChain, freshBooksTaxes: result.freshBooksTaxes,
+    taxReconciliation: result.taxReconciliation, duplicateTransactions: result.duplicateTransactions,
   };
 }
 
@@ -85,6 +86,8 @@ export function repairAuditText(report: ReturnType<typeof repairAudit>): string 
     `Roundtrip validation: ${report.roundtripCheck.checked ? JSON.stringify(report.roundtripCheck) : 'Unavailable'}`,
     ...(report.balanceChain ? [`Running-balance chain: ${JSON.stringify(report.balanceChain)}`] : []),
     ...(report.freshBooksTaxes ? [`FreshBooks tax review: ${JSON.stringify(report.freshBooksTaxes)}`] : []),
+    ...(report.taxReconciliation ? [`Tax reconciliation: ${JSON.stringify(report.taxReconciliation)}`] : []),
+    ...(report.duplicateTransactions ? [`Duplicate transactions: ${JSON.stringify(report.duplicateTransactions)}`] : []),
     '',
     `ISSUES (${report.issues.length})`,
     ...report.issues.map((issue) =>

@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useId, useMemo, useRef, useState } from 'rea
 import type { ColumnSelection, ColumnSuggestions, DiffIssue } from '../../core/shopify-price-diff/types';
 import type { SupplierRecipe } from '../../core/shopify-price-diff/recipe';
 import type { StorePlatform, WorkspaceProfile } from '../../core/shopify-price-diff/workspace-profile';
+import type { ImportPlatform } from '../../core/verify-import/inspector';
 import type { WorkbenchWorker } from '../../core/worker/client';
 import type { BaselineMeta, BomMeta, SupplierMeta } from '../../core/worker/protocol';
 import demoBaseline from '../../../fixtures/shopify-price-diff/baseline-agency.csv?raw';
@@ -17,7 +18,7 @@ import { recipeRemapping } from './supplierRecipe';
 import type { MappingField } from './supplierRecipe';
 import { TabBar } from './TabBar';
 import { useWorkerSession, WorkerStatus } from './workerSession';
-import { STORE_PLATFORMS, withWorkspaceDefaults, WorkspaceProfileControls } from './WorkspaceProfile';
+import { PRICE_UPDATE_PLATFORMS, withWorkspaceDefaults, WorkspaceProfileControls } from './WorkspaceProfile';
 
 const PriceDiffReview = lazy(() => import('./PriceDiffReview').then(({ PriceDiffReview }) => ({ default: PriceDiffReview })));
 const VerifyImportPanel = lazy(() => import('./VerifyImportPanel'));
@@ -25,6 +26,7 @@ const PromoCampaignPanel = lazy(() => import('./promo/PromoCampaignPanel'));
 const SupplierDeltaPanel = lazy(() => import('./supplier-delta/SupplierDeltaPanel'));
 const CatalogMigrationPanel = lazy(() => import('./catalog-migrator/CatalogMigrationPanel'));
 const InventorySyncPanel = lazy(() => import('./inventory-sync/InventorySyncPanel'));
+const AmazonPricePanel = lazy(() => import('./amazon/AmazonPricePanel'));
 
 const STUDIO_MODES = [
   { id: 'build', label: 'Build Update' },
@@ -92,7 +94,7 @@ type SupplierInput = { file?: LocalFile; recipeFile?: File; sheetChoice?: string
 type LoadedSupplier = { file: File; sheetName: string | undefined; firstVisibleSheet?: true; meta: SupplierMeta };
 
 export interface GeneratedPairSource {
-  platform: StorePlatform;
+  platform: ImportPlatform;
   market?: ShopMarket;
   baseline: File;
   load: () => Promise<{ update: File; rollback: File }>;
@@ -162,10 +164,11 @@ export function PriceDiffWorkbench({ characterKeys }: { characterKeys: boolean }
   const [pairMode, setPairMode] = useState<PairMode>('build');
   const [buildPair, setBuildPair] = useState<GeneratedPairSource | null>(null);
   const [campaignPair, setCampaignPair] = useState<GeneratedPairSource | null>(null);
-  const [platform, setPlatform] = useState<StorePlatform>('shopify');
+  const [buildPlatform, setBuildPlatform] = useState<ImportPlatform>('shopify');
+  const [amazonBatchStarted, setAmazonBatchStarted] = useState(false);
   const [marketName, setMarketName] = useState<string>();
   const [targetChanged, setTargetChanged] = useState(false);
-  const [pendingPlatform, setPendingPlatform] = useState<StorePlatform | null>(null);
+  const [pendingPlatform, setPendingPlatform] = useState<ImportPlatform | null>(null);
   const platformControls = useRef<HTMLDivElement>(null);
   const [profile, setProfile] = useState<WorkspaceProfile | null>(null);
   const [profileRevision, setProfileRevision] = useState(0);
@@ -190,7 +193,9 @@ export function PriceDiffWorkbench({ characterKeys }: { characterKeys: boolean }
   const active = prepared?.inputs === inputs ? prepared.data : null;
   const busy = Boolean(progress) || paused;
   const multiple = order.length > 1;
-  const platformLabel = STORE_PLATFORMS[platform];
+  const amazon = buildPlatform === 'amazon';
+  const platform: StorePlatform = buildPlatform === 'amazon' ? 'shopify' : buildPlatform;
+  const platformLabel = PRICE_UPDATE_PLATFORMS[buildPlatform];
   const woo = platform === 'woocommerce';
   const bigCommerce = platform === 'bigcommerce';
   const usingKitDemo = baselineFile?.synthetic && baselineFile.file.name === kitDemoBaselineName(platform);
@@ -371,19 +376,20 @@ export function PriceDiffWorkbench({ characterKeys }: { characterKeys: boolean }
     setOrder([PRIMARY]);
   }
 
-  function switchPlatform(next: StorePlatform) {
+  function switchPlatform(next: ImportPlatform) {
     resetBatch();
     setBaselineFile(undefined);
     setSupplierInputs({ [PRIMARY]: {} });
     setProfile(null);
+    setAmazonBatchStarted(false);
     setPendingPlatform(null);
-    setPlatform(next);
+    setBuildPlatform(next);
     platformControls.current?.querySelector<HTMLButtonElement>(`[data-platform="${next}"]`)?.focus({ preventScroll: true });
   }
 
-  function choosePlatform(next: StorePlatform) {
-    if (platform === next) setPendingPlatform(null);
-    else if (baselineFile || bomFile || bomError || profile || Object.values(supplierInputs).some(({ file, recipeFile }) => file || recipeFile)) setPendingPlatform(next);
+  function choosePlatform(next: ImportPlatform) {
+    if (buildPlatform === next) setPendingPlatform(null);
+    else if (amazonBatchStarted || baselineFile || bomFile || bomError || profile || Object.values(supplierInputs).some(({ file, recipeFile }) => file || recipeFile)) setPendingPlatform(next);
     else switchPlatform(next);
   }
 
@@ -530,24 +536,31 @@ export function PriceDiffWorkbench({ characterKeys }: { characterKeys: boolean }
       </div>
       <div id={`${heading}-build-panel`} role="tabpanel" aria-labelledby={`${heading}-build-tab`} hidden={mode !== 'build'}>
         <div className="workbench-input price-studio-pane">
-          <div className="price-section">
+          <div className="price-section price-build-platform">
             <div className="price-store-platform">
               <span id={`${heading}-platform`}>Store platform</span>
               <div className="price-platform-toggle" role="group" aria-labelledby={`${heading}-platform`} ref={platformControls}>
-                {(Object.keys(STORE_PLATFORMS) as StorePlatform[]).map((option) => (
-                  <button key={option} type="button" data-platform={option} aria-pressed={platform === option}
-                    onClick={() => choosePlatform(option)}>{STORE_PLATFORMS[option]}</button>
+                {(Object.keys(PRICE_UPDATE_PLATFORMS) as ImportPlatform[]).map((option) => (
+                  <button key={option} type="button" data-platform={option} aria-pressed={buildPlatform === option}
+                    onClick={() => choosePlatform(option)}>{PRICE_UPDATE_PLATFORMS[option]}</button>
                 ))}
               </div>
             </div>
             {pendingPlatform ? <div className="price-platform-confirm">
-              <p className="field-help" role="status">Switching to {STORE_PLATFORMS[pendingPlatform]} clears this batch and its workspace settings.</p>
-              <button type="button" className="button button-secondary button-small" onClick={() => switchPlatform(pendingPlatform)}>Switch to {STORE_PLATFORMS[pendingPlatform]}</button>
+              <p className="field-help" role="status">Switching to {PRICE_UPDATE_PLATFORMS[pendingPlatform]} clears {amazon ? 'this Amazon batch' : 'this batch and its workspace settings'}.</p>
+              <button type="button" className="button button-secondary button-small" onClick={() => switchPlatform(pendingPlatform)}>Switch to {PRICE_UPDATE_PLATFORMS[pendingPlatform]}</button>
               <button type="button" className="text-button" onClick={() => {
-                platformControls.current?.querySelector<HTMLButtonElement>(`[data-platform="${platform}"]`)?.focus({ preventScroll: true });
+                platformControls.current?.querySelector<HTMLButtonElement>(`[data-platform="${buildPlatform}"]`)?.focus({ preventScroll: true });
                 setPendingPlatform(null);
               }}>Keep this batch</button>
             </div> : null}
+          </div>
+          {amazon ? (
+            <Suspense fallback={<p className="price-section price-build-files" role="status">Opening Amazon Price &amp; Quantity…</p>}>
+              <AmazonPricePanel onBatchStarted={setAmazonBatchStarted} onPairAvailable={setBuildPair} />
+            </Suspense>
+          ) : null}
+          {!amazon ? <div className="price-section price-build-files">
             <div className="price-heading">
               <div>
                 <h2 id={heading} tabIndex={-1}>{multiple ? `Add your ${platformLabel} baseline and supplier sheets` : 'Add your two price files'}</h2>
@@ -664,9 +677,9 @@ export function PriceDiffWorkbench({ characterKeys }: { characterKeys: boolean }
             {!reviewSources ? <PriceDiffIssues issues={active?.baseline?.issues ?? []} title="Baseline file checks" /> : null}
             {!reviewSources ? targetSelector : null}
             <WorkspaceProfileControls key={platform} platform={platform} profile={profile} selection={profileSelection} onApply={applyProfile} />
-          </div>
+          </div> : null}
         </div>
-        {reviewSources ? (
+        {!amazon && reviewSources ? (
           <Suspense fallback={<p role="status">Opening price review…</p>}>
             <PriceDiffReview key={profileRevision} platform={platform} workspaceCurrency={profile?.storeCurrency} session={session} worker={validWorker && !paused && !bomError ? prepared?.worker ?? null : null}
               sources={reviewSources} baselineIssues={active?.baseline?.issues ?? []} drafts={drafts} setDrafts={setDrafts}
@@ -680,7 +693,7 @@ export function PriceDiffWorkbench({ characterKeys }: { characterKeys: boolean }
         className="workbench-input price-studio-pane" hidden={mode !== 'verify'}>
         {verifyVisited ? (
           <Suspense fallback={<p className="price-section" role="status">Opening CSV verification…</p>}>
-            <VerifyImportPanel pairSource={pairSource} buildPlatform={platform} />
+            <VerifyImportPanel pairSource={pairSource} buildPlatform={buildPlatform} />
           </Suspense>
         ) : null}
       </div>

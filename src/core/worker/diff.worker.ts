@@ -1,4 +1,5 @@
 import { repairCsvWithBytes } from '..';
+import { buildAmazonPriceDiff, type AmazonPriceResult } from '../amazon-price-diff';
 import { createCatalogImpact, type CatalogMarginRow } from '../analytics/catalog-impact';
 import { sha256, type BomFingerprint, type PriceCustody, type RepairCustody, type SupplierFingerprint } from '../audit/custody';
 import { parseBom, type BomSheet } from '../bom/rollup';
@@ -17,7 +18,7 @@ import type { RepairOptions, RepairResult } from '../types';
 import { inspectImport, type ImportInspection } from '../verify-import/inspector';
 import { suggestPlatforms } from './platform-suggestion';
 import { invalidatesResult, resultScope, supersededResult } from './protocol';
-import type { DiffFilter, DiffSummary, DownloadFormat, InspectionSummary, PlatformSuggestion, RepairSummary, SheetMeta, SupplierMeta, WorkerDownload, WorkerMessage, WorkerPage, WorkerProgress, WorkerReply, WorkerRequest, WorkerResult } from './protocol';
+import type { AmazonPriceSummary, DiffFilter, DiffSummary, DownloadFormat, InspectionSummary, PlatformSuggestion, RepairSummary, SheetMeta, SupplierMeta, WorkerDownload, WorkerMessage, WorkerPage, WorkerProgress, WorkerReply, WorkerRequest, WorkerResult } from './protocol';
 import { guardSummary, indexRepairViews, repairAudit, repairAuditText } from './repair-views';
 import type { SignoffBrand } from '../branding/signoff-brand';
 import { runPriceComparison, simulatePriceScenarios, type PriceComparison } from '../whatif/simulator';
@@ -44,6 +45,7 @@ const defaultSupplierId = 'primary';
 let bom: { sheet: BomSheet; fingerprint: BomFingerprint } | undefined;
 let price: Awaited<ReturnType<typeof indexPriceResult>> | undefined;
 let inspection: ImportInspection | undefined;
+let amazonPrice: AmazonPriceResult | undefined;
 let repairSource: { filename: string; bytes: Uint8Array; sha256: string; bankSuggestions?: PlatformSuggestion[] } | undefined;
 let repair: { result: RepairResult; options: RepairOptions; views: ReturnType<typeof indexRepairViews>; suggestions: PlatformSuggestion[];
   verifiedBytes: Uint8Array<ArrayBuffer> | null; custody: RepairCustody } | undefined;
@@ -161,6 +163,16 @@ function pricePlatformName(): string {
 }
 
 function download(format: DownloadFormat, branding?: SignoffBrand): WorkerDownload {
+  if (format.startsWith('amazon-')) {
+    const state = requireLoaded(amazonPrice, 'Run the Amazon comparison before downloading.');
+    if (format === 'amazon-audit-json') return makeDownload(state.fileNames.audit, state.auditJson, jsonMime);
+    const rollback = format === 'amazon-rollback';
+    const verified = rollback ? state.rollbackBytes : state.updateBytes;
+    if (!verified) throw new Error('The Amazon update and rollback files are unavailable. Review the comparison.');
+    const filename = rollback ? state.fileNames.rollback : state.fileNames.update;
+    const mime = filename.endsWith('.txt') ? 'text/plain;charset=utf-8' : state.delimiter === '\t' ? 'text/tab-separated-values;charset=utf-8' : csvMime;
+    return { filename, bytes: verified.slice().buffer, mime };
+  }
   if (format.startsWith('price-')) {
     const state = requireLoaded(price, 'Run the ' + pricePlatformName() + ' price comparison before downloading.');
     const basename = baseline?.name.replace(/\.csv$/i, '') || baseline?.platform || 'shopify';
@@ -310,6 +322,23 @@ async function run(request: WorkerRequest, progress: Progress, ensureCurrent: ()
       const page = pageOf(state.issues, request.page, request.pageSize);
       return { ...page, rows: page.rows.map(previewIssue) };
     }
+    case 'buildAmazonPriceDiff': {
+      amazonPrice = undefined;
+      progress('reading', 5);
+      const [original, proposal] = await Promise.all([request.baseline.arrayBuffer(), request.proposal.arrayBuffer()]);
+      ensureCurrent();
+      progress('comparing', 35);
+      const result = await buildAmazonPriceDiff({ filename: request.baseline.name, bytes: new Uint8Array(original) },
+        { filename: request.proposal.name, bytes: new Uint8Array(proposal) });
+      ensureCurrent();
+      amazonPrice = result;
+      const { status, canDownload, delimiter, fileNames, verification, rows, issues } = result;
+      const summary: AmazonPriceSummary = { status, canDownload, delimiter, fileNames, verification, rowCount: rows.length, issueCount: issues.length };
+      progress('comparing', 100);
+      return summary;
+    }
+    case 'amazonPriceRows': return pageOf(requireLoaded(amazonPrice, 'Run the Amazon comparison first.').rows, request.page, request.pageSize);
+    case 'amazonPriceIssues': return pageOf(requireLoaded(amazonPrice, 'Run the Amazon comparison first.').issues, request.page, request.pageSize);
     case 'inspectImport': {
       inspection = undefined;
       progress('reading', 5);
@@ -368,7 +397,8 @@ async function run(request: WorkerRequest, progress: Progress, ensureCurrent: ()
       }
       const views = indexRepairViews(result);
       repair = { result, options: request.options, views, suggestions, verifiedBytes, custody };
-      const { rows, removedRows, issues, changes, repairedCsv: _, formulaGuard, bookkeeperAmounts: _amounts, freshBooksTaxes: _taxes, ...metadata } = result;
+      const { rows, removedRows, issues, changes, repairedCsv: _, formulaGuard, bookkeeperAmounts: _amounts,
+        freshBooksTaxes: _taxes, taxReconciliation, duplicateTransactions, ...metadata } = result;
       let fixed = 0;
       let warnings = 0;
       for (const issue of issues) {
@@ -379,6 +409,14 @@ async function run(request: WorkerRequest, progress: Progress, ensureCurrent: ()
       const summary: RepairSummary = { ...metadata, formulaGuard: guardSummary(formulaGuard), suggestions, custody,
         rowCount: rows.length, removedRowCount: removedRows.length, issueCount: issues.length, fixed, warnings, manuallyEdited,
         beforeHeaderMarks: views.beforeHeaderMarks, afterHeaderMarks: views.afterHeaderMarks };
+      if (taxReconciliation) {
+        const { status, checkedRows, mismatchCount, unverifiableCount } = taxReconciliation;
+        summary.taxReconciliation = { status, checkedRows, mismatchCount, unverifiableCount };
+      }
+      if (duplicateTransactions) {
+        const { groupCount, affectedRows } = duplicateTransactions;
+        summary.duplicateTransactions = { groupCount, affectedRows };
+      }
       progress('repairing', 100);
       return summary;
     }
@@ -453,7 +491,7 @@ async function run(request: WorkerRequest, progress: Progress, ensureCurrent: ()
 }
 
 let queue = Promise.resolve();
-const revisions = { price: 0, repair: 0, inspection: 0 };
+const revisions = { price: 0, repair: 0, inspection: 0, amazon: 0 };
 scope.onmessage = ({ data: { id, request } }) => {
   const invalidated = invalidatesResult(request);
   if (invalidated) revisions[invalidated]++;

@@ -4,11 +4,13 @@ import {
   createWorkspaceProfile, serializeWorkspaceProfile,
 } from '../../core/shopify-price-diff/workspace-profile';
 import type { StorePlatform, WorkspaceProfile } from '../../core/shopify-price-diff/workspace-profile';
+import type { ImportPlatform } from '../../core/verify-import/inspector';
 import { downloadFile } from './downloads';
 import { SignoffBrandingDrawer, useSignoffBranding } from './SignoffBranding';
 import { readWorkspaceProfileFile } from './workspaceProfileFile';
 
 export const STORE_PLATFORMS = { shopify: 'Shopify', woocommerce: 'WooCommerce', bigcommerce: 'BigCommerce' } as const satisfies Record<StorePlatform, string>;
+export const PRICE_UPDATE_PLATFORMS = { ...STORE_PLATFORMS, amazon: 'Amazon Seller Central' } as const satisfies Record<ImportPlatform, string>;
 
 export function withWorkspaceDefaults(selection: ColumnSelection, profile: WorkspaceProfile): ColumnSelection {
   const { dropThresholdPercent, increaseThresholdPercent, inventoryDropThresholdPercent, pricingRule: tiered } = profile;

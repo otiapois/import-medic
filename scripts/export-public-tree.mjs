@@ -18,6 +18,7 @@ const publicFiles = new Set([
 ]);
 const publicTrees = [
   ['src/', /\.(?:ts|tsx|css|json)$/],
+  ['fixtures/amazon/', /\.tsv$/],
   ['fixtures/', /\.(?:csv|xlsx|json)$/],
   ['tests/', /\.(?:ts|tsx|csv|xlsx|json)$/],
   ['docs/subsystems/', /\.md$/],

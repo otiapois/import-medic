@@ -1,26 +1,12 @@
 import type { Journal } from '../journal';
 import { columnIndex, type Table, type WorkingRow } from '../table';
 import type { BalanceChain, BalanceChainBreak } from '../types';
-import { currencyFractionDigits, normalizeAmount } from '../values';
+import { currencyFractionDigits, formatMinorUnits, normalizeAmount, readMinorUnits } from '../values';
 
 export interface BankMovement {
   date?: string;
   amount?: string;
   amountColumn: string;
-}
-
-// The working value is a normalized decimal string. Extra trailing zeros are exact.
-function readMinorUnits(value: string | undefined, scale: number): bigint | undefined {
-  if (value === undefined) return undefined;
-  const [whole, fraction = ''] = value.split('.');
-  const significant = fraction.replace(/0+$/, '');
-  return significant.length > scale ? undefined : BigInt(whole + significant.padEnd(scale, '0'));
-}
-
-function formatMinorUnits(value: bigint, scale: number): string {
-  if (scale === 0) return value.toString();
-  const magnitude = (value < 0n ? -value : value).toString().padStart(scale + 1, '0');
-  return (value < 0n ? '-' : '') + magnitude.slice(0, -scale) + '.' + magnitude.slice(-scale);
 }
 
 const headerBlocks = new Set(['missing-header', 'duplicate-header', 'ambiguous-header', 'credit-debit-direction']);

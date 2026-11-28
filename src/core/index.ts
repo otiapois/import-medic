@@ -148,6 +148,8 @@ export function repairCsvWithBytes(
     bookkeeperAmounts: journal.bookkeeperAmounts ?? [],
     ...(journal.balanceChain && { balanceChain: journal.balanceChain }),
     ...(journal.freshBooksTaxes && { freshBooksTaxes: journal.freshBooksTaxes }),
+    ...(journal.taxReconciliation && { taxReconciliation: journal.taxReconciliation }),
+    ...(journal.duplicateTransactions && { duplicateTransactions: journal.duplicateTransactions }),
     ...(journal.currencySplit && { currencySplit: journal.currencySplit }),
     ...(pass.feeConvention && { stripePayPalFeeConvention: pass.feeConvention }),
   };

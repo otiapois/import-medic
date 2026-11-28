@@ -1,4 +1,5 @@
 import { PLATFORM_IDS, repairCsvWithBytes, type RepairOptions } from '..';
+import { buildAmazonPriceDiff } from '../amazon-price-diff';
 import { sha256, type PriceCustody, type RepairCustody } from '../audit/custody';
 import { buildInventorySync, inspectInventorySupplier, type InventorySupplierSource, type InventorySyncOptions } from '../inventory-sync/engine';
 import { parseBigCommerceBaseline } from '../bigcommerce-price-diff';
@@ -13,13 +14,14 @@ import { createSignoffHtml } from '../shopify-price-diff/signoff-html';
 import { issue, type BatchDiffOptions, type StorePlatform } from '../shopify-price-diff/types';
 import { buildSupplierDelta, inspectSupplierDeltaSource } from '../supplier-delta/engine';
 import type { SupplierDeltaMapping, SupplierDeltaSide } from '../supplier-delta/types';
-import { inspectImport } from '../verify-import/inspector';
+import { inspectImport, type ImportPlatform } from '../verify-import/inspector';
 import { parseWooCommerceBaseline } from '../woocommerce-price-diff';
 import { repairAudit } from '../worker/repair-views';
 import { runPriceComparison } from '../whatif/simulator';
 
 export const cliModes = ['repair', 'price-diff', 'verify', 'promo', 'supplier-delta', 'migrate', 'inventory-sync', 'cost-creep'] as const;
 export const storePlatforms = ['shopify', 'woocommerce', 'bigcommerce'] as const satisfies readonly StorePlatform[];
+export const importPlatforms = [...storePlatforms, 'amazon'] as const satisfies readonly ImportPlatform[];
 export type CliMode = typeof cliModes[number];
 export interface CliFile { filename: string; bytes: Uint8Array }
 export type CliArtifact = CliFile & { role: string };
@@ -53,7 +55,8 @@ type PriceRequest = { mode: 'price-diff'; platform: StorePlatform; baseline: Cli
 export type CliRequest =
   | { mode: 'repair'; source: CliFile; platform: typeof PLATFORM_IDS[number]; options: RepairOptions; generatedAt: Date }
   | PriceRequest
-  | { mode: 'verify'; platform: StorePlatform; baseline: CliFile; candidate: CliFile; matchedUpdate?: CliFile }
+  | { mode: 'price-diff'; platform: 'amazon'; baseline: CliFile; proposal: CliFile }
+  | { mode: 'verify'; platform: ImportPlatform; baseline: CliFile; candidate: CliFile; matchedUpdate?: CliFile }
   | { mode: 'promo'; platform: StorePlatform; baseline: CliFile; costSheet?: CliFile; options: Omit<PromoCampaignOptions, 'costSheet'> }
   | { mode: 'supplier-delta'; previous: DeltaSource; next: DeltaSource }
   | { mode: 'inventory-sync'; baseline: CliFile; suppliers: CliInventorySupplier[]; options: InventorySyncOptions }
@@ -214,7 +217,12 @@ async function supplierDelta(previous: DeltaSource, next: DeltaSource): Promise<
 export async function dispatchCli(request: CliRequest): Promise<CliResult> {
   switch (request.mode) {
     case 'repair': return repair(request);
-    case 'price-diff': return priceDiff(request);
+    case 'price-diff': {
+      if (request.platform !== 'amazon') return priceDiff(request);
+      const { status, updateBytes, rollbackBytes, fileNames, auditJson } = await buildAmazonPriceDiff(request.baseline, request.proposal);
+      return result(status, artifact('audit', fileNames.audit, auditJson),
+        ...(updateBytes && rollbackBytes ? [artifact('update', fileNames.update, updateBytes), artifact('rollback', fileNames.rollback, rollbackBytes)] : []));
+    }
     case 'verify': {
       const report = await inspectImport(request.platform, request.baseline.bytes, request.candidate.bytes, request.matchedUpdate?.bytes);
       return result(report.verdict, artifact('report', 'verify-report.json', json(report)));

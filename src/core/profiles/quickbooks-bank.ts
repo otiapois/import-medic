@@ -1,4 +1,5 @@
 import { auditBankBalance, type BankMovement } from '../accounting/balance-chain';
+import { auditTaxReconciliation, trackDuplicateTransactions } from '../accounting/tax-duplicate';
 import type { CsvRecord } from '../csv';
 import type { Journal } from '../journal';
 import { auditProjection, columnIndex, headerAliases, requireColumn, type Table, type WorkingRow } from '../table';
@@ -132,6 +133,7 @@ function convertAmounts(row: WorkingRow, source: SourceAmount, splitTarget: bool
 }
 
 export function repairQuickBooks(table: Table, journal: Journal, options: RepairOptions): { headers: string[]; dateOrder: Exclude<DateOrder, 'auto'> } {
+  auditTaxReconciliation(table, journal);
   const date = requireColumn(table, 'Date', journal);
   const description = requireColumn(table, 'Description', journal);
   const amount = sourceAmount(table, journal, options);
@@ -156,6 +158,7 @@ export function repairQuickBooks(table: Table, journal: Journal, options: Repair
   const split = options.qboLayout === '4col';
   const headers = split ? QUICKBOOKS_4COL : QUICKBOOKS_3COL;
   const kept = new Set(['Date', 'Description', ...('signed' in amount ? [amount.signed.name] : [amount.spent.name, amount.received.name])]);
+  const duplicateAudit = trackDuplicateTransactions(table, journal, ['Description']);
   auditProjection(table, kept, journal);
   const sourceLayout = table.headers.filter((column) => kept.has(column));
   if (split && !('signed' in amount) && amount.spent.name === 'Debit') {
@@ -175,6 +178,10 @@ export function repairQuickBooks(table: Table, journal: Journal, options: Repair
       const value = split ? payment ? `-${payment}` : deposit : payment;
       const valid = value && !journal.issues.slice(existingIssues).some(({ autoFixed }) => !autoFixed);
       journal.bookkeeperAmounts?.push({ row: line, currency: currencyCode ?? null, amounts: valid ? { amount: value } : {} });
+      if (valid && duplicateAudit) {
+        const sourceAmount = 'signed' in amount ? amount.signed : value.startsWith('-') ? amount.spent : amount.received;
+        duplicateAudit.record(row, dateValue.iso, value, row.cells[sourceAmount.index], currencyCode);
+      }
       if (balance !== undefined) {
         const amountColumn = 'signed' in amount ? amount.signed.name : value.startsWith('-') ? amount.spent.name : amount.received.name;
         movements.set(row, { date: dateValue.iso, amount: valid ? value : undefined, amountColumn });
@@ -184,6 +191,7 @@ export function repairQuickBooks(table: Table, journal: Journal, options: Repair
       dateValue.value, descriptionValue, ...amounts,
     ];
   }
+  duplicateAudit?.finish();
   auditBankBalance(table, journal, movements, 'Date', currencyCodes);
   return { headers, dateOrder: outputOrder };
 }

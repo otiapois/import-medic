@@ -91,6 +91,7 @@ export function Results({ result, worker, current, busy, guardEnabled, onEdit, o
                 </div>
                 <p className="sr-only" role="status">{saveMessage}</p>
                 {current && result.currencySplit?.length ? <CurrencySplit groups={result.currencySplit} platform={result.platform} /> : null}
+                {current && (result.duplicateTransactions || result.taxReconciliation) ? <BookkeeperChecks result={result} /> : null}
                 <ReviewList key={filter} worker={worker} result={result} current={current} filter={filter} onEdit={saveEdit} />
               </>
             ) : null}
@@ -106,6 +107,43 @@ export function Results({ result, worker, current, busy, guardEnabled, onEdit, o
       </section>
       <Inquiry />
     </>
+  );
+}
+
+function BookkeeperChecks({ result: { duplicateTransactions, taxReconciliation } }: { result: RepairSummary }) {
+  const id = useId();
+  const taxVerified = taxReconciliation?.status === 'VERIFIED';
+  return (
+    <div className="bookkeeper-checks">
+      {duplicateTransactions ? (
+        <section aria-labelledby={`${id}-duplicate`} data-testid="duplicate-transaction-alerts">
+          <header>
+            <h4 id={`${id}-duplicate`}>Duplicate Transaction Alerts</h4>
+            <strong className={`issue-badge ${duplicateTransactions.groupCount ? 'badge-review' : 'badge-fixed'}`}>
+              {duplicateTransactions.groupCount ? 'Needs review' : 'No exact duplicates'}
+            </strong>
+          </header>
+          {duplicateTransactions.groupCount ? <p className="field-help">
+            {duplicateTransactions.groupCount.toLocaleString('en-US')} duplicate {duplicateTransactions.groupCount === 1 ? 'group' : 'groups'} · {duplicateTransactions.affectedRows.toLocaleString('en-US')} affected source lines.
+          </p> : null}
+        </section>
+      ) : null}
+      {taxReconciliation ? (
+        <section aria-labelledby={`${id}-tax`} data-testid="tax-reconciliation" data-tax-status={taxReconciliation.status}>
+          <header>
+            <h4 id={`${id}-tax`}>Tax Reconciliation (Net + Tax == Gross)</h4>
+            <strong className={`issue-badge ${taxVerified ? 'badge-fixed' : 'badge-review'}`}>
+              {taxVerified ? 'Verified' : taxReconciliation.mismatchCount ? 'Mismatch found' : 'Unverifiable'}
+            </strong>
+          </header>
+          <p className="field-help">
+            {taxReconciliation.checkedRows.toLocaleString('en-US')} {taxReconciliation.checkedRows === 1 ? 'row' : 'rows'} checked in exact cents.
+            {taxReconciliation.mismatchCount ? ` ${taxReconciliation.mismatchCount.toLocaleString('en-US')} ${taxReconciliation.mismatchCount === 1 ? 'mismatch' : 'mismatches'}.` : ''}
+            {taxReconciliation.unverifiableCount ? ` ${taxReconciliation.unverifiableCount.toLocaleString('en-US')} unverifiable.` : ''}
+          </p>
+        </section>
+      ) : null}
+    </div>
   );
 }
 
@@ -201,9 +239,9 @@ function IssueItem({
   const titleElement = useRef<HTMLHeadingElement>(null);
   const title = `Line ${issue.row} · ${issue.column}`;
   const rulePath = issue.ruleDocSlug.startsWith('/fix/') ? issue.ruleDocSlug : null;
-  const reconciliation = issue.reconciliation;
+  const { reconciliation, taxReconciliation, relatedLines } = issue;
   return (
-    <li className="issue-item" aria-label={title} data-issue-code={issue.code}>
+    <li className="issue-item" aria-label={title} data-issue-code={issue.code} data-source-row={issue.row}>
       <div className="issue-main">
         <div className="issue-title">
           <h4 ref={titleElement} tabIndex={-1}>{title}</h4>
@@ -222,6 +260,20 @@ function IssueItem({
               <dd><code>{reconciliation.expectedNet}</code> <span>Gross {reconciliation.feeConvention === 'deduction' ? '−' : '+'} Fee</span></dd>
             </div>
           </dl>
+        ) : null}
+        {taxReconciliation ? (
+          <dl className="reconciliation-details" data-testid="tax-reconciliation-details" aria-label="Tax reconciliation mismatch">
+            <div><dt>Net</dt><dd><code>{taxReconciliation.net}</code></dd></div>
+            <div><dt>Tax</dt><dd><code>{taxReconciliation.tax}</code></dd></div>
+            <div><dt>Gross</dt><dd><code>{taxReconciliation.gross}</code></dd></div>
+            <div><dt>Expected Gross</dt><dd><code>{taxReconciliation.expectedGross}</code></dd></div>
+            <div><dt>Gross discrepancy</dt><dd><code>{taxReconciliation.delta}</code></dd></div>
+          </dl>
+        ) : null}
+        {relatedLines?.length ? (
+          <p className="duplicate-source-lines" data-testid="duplicate-source-lines">
+            <strong>Matching source lines</strong> <code>{[issue.row, ...relatedLines].sort((left, right) => left - right).join(', ')}</code>
+          </p>
         ) : null}
         <div className="cell-pair">
           <div><span>Before</span><code>{issue.rawValue || '(empty)'}</code></div>

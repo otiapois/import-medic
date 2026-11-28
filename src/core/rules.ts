@@ -54,6 +54,9 @@ const RULE_SLUGS = {
   'balance-chain-unverifiable': 'quickbooks-3-column-vs-4-column',
   'freshbooks-mixed-sign': 'quickbooks-csv-negative-parentheses',
   'freshbooks-amount-scale': 'quickbooks-csv-negative-parentheses',
+  FAIL_TAX_MISMATCH: 'quickbooks-3-column-vs-4-column',
+  FAIL_TAX_UNVERIFIABLE: 'quickbooks-3-column-vs-4-column',
+  FAIL_DUPLICATE_TRANSACTION: 'quickbooks-3-column-vs-4-column',
 } as const;
 
 export type RuleId = keyof typeof RULE_SLUGS;

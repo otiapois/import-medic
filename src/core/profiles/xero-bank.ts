@@ -1,4 +1,5 @@
 import { auditBankBalance, type BankMovement } from '../accounting/balance-chain';
+import { auditTaxReconciliation, trackDuplicateTransactions } from '../accounting/tax-duplicate';
 import type { Journal } from '../journal';
 import { auditProjection, columnIndex, headerAliases, requireColumn, type Table, type WorkingRow } from '../table';
 import type { RepairOptions } from '../types';
@@ -20,6 +21,7 @@ export const xeroAliases = headerAliases({
 });
 
 export function repairXero(table: Table, journal: Journal, options: RepairOptions): string[] {
+  auditTaxReconciliation(table, journal);
   const date = requireColumn(table, dateColumn, journal);
   const amount = requireColumn(table, amountColumn, journal);
   const movements = new Map<WorkingRow, BankMovement>();
@@ -38,6 +40,7 @@ export function repairXero(table: Table, journal: Journal, options: RepairOption
   }
   const headers = nativeColumns.filter((column) => columnIndex(table, column) !== undefined);
   const projection = headers.map((column) => table.positions.get(column.toLowerCase())!);
+  const duplicateAudit = trackDuplicateTransactions(table, journal, ['Payee', 'Description']);
   auditProjection(table, new Set(headers), journal);
   const inputOrder = options.dateOrder === 'auto' ? undefined : options.dateOrder;
   for (const row of rows) {
@@ -45,12 +48,14 @@ export function repairXero(table: Table, journal: Journal, options: RepairOption
     const currencyCode = currencies?.get(row);
     const repairedDate = repairDate(row.cells[date], journal, { row: line, column: dateColumn }, inputOrder, 'YMD', { blockInvalid: true });
     const movement = repairAmount(row.cells[amount], line, amountColumn, journal, { blockInvalid: true, allowTrailingMinus: true, currencyCode });
+    if (movement.valid) duplicateAudit?.record(row, repairedDate.iso, movement.value, row.cells[amount], currencyCode);
     if (balance !== undefined) movements.set(row, { date: repairedDate.iso, amount: movement.valid ? movement.value : undefined, amountColumn });
     if (journal.bookkeeperAmounts) {
       journal.bookkeeperAmounts.push({ row: line, currency: currencyCode ?? null, amounts: movement.valid ? { amount: movement.value } : {} });
     }
     row.after = [repairedDate.value, movement.value, ...projection.slice(2).map((index) => row.cells[index])];
   }
+  duplicateAudit?.finish();
   auditBankBalance(table, journal, movements, dateColumn, currencies);
   return headers;
 }

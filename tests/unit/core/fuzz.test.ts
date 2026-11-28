@@ -4,6 +4,7 @@ import fc from 'fast-check';
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { describe, expect, it } from 'vitest';
 import { repairCsv, repairCsvWithBytes } from '../../../src/core';
+import { buildAmazonPriceDiff } from '../../../src/core/amazon-price-diff';
 import { sha256 } from '../../../src/core/audit/custody';
 import { analyzeCatalogImpact, createCatalogImpact } from '../../../src/core/analytics/catalog-impact';
 import { parseBigCommerceBaseline } from '../../../src/core/bigcommerce-price-diff/source';
@@ -15,7 +16,7 @@ import { readWooCommerceCatalog } from '../../../src/core/catalog-migrator/wooco
 import { createCustodyManifest, dispatchCli, type CliResult } from '../../../src/core/cli/dispatch';
 import { isSafeFileName, isSafeLocalPath } from '../../../src/core/cli/paths';
 import { buildCostCreep } from '../../../src/core/cost-creep/engine';
-import { decodeCsv, parseCsv, serializeCsv } from '../../../src/core/csv';
+import { decodeCsv, parseCsv, serializeCsv, serializeCsvRecords } from '../../../src/core/csv';
 import { guardSpreadsheetCell } from '../../../src/core/formula-guard';
 import { buildInventorySync } from '../../../src/core/inventory-sync/engine';
 import { buildPromoCampaign, type PromoCampaignOptions } from '../../../src/core/promo-campaign/engine';
@@ -2116,7 +2117,109 @@ describe('M20 deterministic cost-creep properties', () => {
   }, 30_000);
 });
 
-it('accounts for all 37,720 seeded executions without skips', () => {
-  expect(fuzzExecutions).toEqual({ accepted: 37_720, discarded: 0, properties: 64 });
+describe('M21 Amazon corridor and accounting audit', () => {
+  it('roundtrips scoped flat-file cells or holds precise corridor violations', async () => {
+    await checkAsyncFuzz(fc.asyncProperty(
+      fc.integer({ min: 100, max: 1_000_000 }), fc.integer({ min: 0, max: 1_000_000 }), fc.nat({ max: 500 }),
+      fc.constantFrom(',' as const, '\t' as const), fc.boolean(), fc.integer({ min: 0, max: 5 }),
+      fc.constantFrom('min', 'max', 'below', 'above', 'inverted', 'malformed', 'unrestorable'),
+      async (minimum, identifier, quantity, delimiter, textExtension, embedded, variant) => {
+        const sku = '00' + identifier;
+        const maximum = minimum + 25;
+        const next = variant === 'min' ? minimum : variant === 'max' ? maximum : variant === 'below' ? minimum - 1 :
+          variant === 'above' ? maximum + 1 : minimum + 1;
+        const money = (units: number) => cents(BigInt(units));
+        const oldPrice = '0' + money(variant === 'unrestorable' ? minimum - 1 : minimum + 2);
+        const oldQuantity = '007' + quantity;
+        const baselineRows = [['sku', 'price', 'minimum-seller-allowed-price', 'maximum-seller-allowed-price', 'quantity', 'handling-time', 'note'],
+          ['SIBLING', '15.00', '', '', '04', '01', 'a\n'.repeat(embedded) + 'b'],
+          [sku, oldPrice, variant === 'malformed' ? 'invalid' : money(minimum), money(variant === 'inverted' ? minimum - 1 : maximum), oldQuantity, '02', 'untouched']];
+        const filename = 'catalog.' + (delimiter === ',' ? 'csv' : textExtension ? 'txt' : 'tsv');
+        const baseline = { filename, bytes: bytes(serializeCsvRecords(baselineRows, 'amazon', delimiter)) };
+        const proposal = { filename: 'changes.csv', bytes: csvBytes(['sku', 'price', 'quantity'], [
+          ['SIBLING', '15.00', ''], [sku, money(next), String(quantity)],
+        ]) };
+        const report = await buildAmazonPriceDiff(baseline, proposal);
+        if (variant === 'min' || variant === 'max') {
+          expect(report).toMatchObject({ status: 'ready', delimiter, rows: [{ sku, baselineLine: 3 + embedded, candidateLine: 3 }] });
+          const records = (file: Uint8Array) => parseCsv(decodeCsv(file).text, delimiter).records.map(row => row.cells);
+          expect(records(report.updateBytes!)).toEqual([['sku', 'price', 'quantity'], [sku, money(next), String(quantity)]]);
+          expect(records(report.rollbackBytes!)).toEqual([['sku', 'price', 'quantity'], [sku, oldPrice, oldQuantity]]);
+          expect(await inspectImport('amazon', baseline.bytes, report.rollbackBytes!, report.updateBytes!)).toMatchObject({
+            verdict: 'PASS', nonTargetMutations: 0, rollback: { restored: true, residualDiffs: 0 } });
+          const wrong = bytes(decodeCsv(report.rollbackBytes!).text.replace(oldPrice, oldPrice.slice(1)));
+          expect(await inspectImport('amazon', baseline.bytes, wrong, report.updateBytes!)).toMatchObject({
+            verdict: 'FAIL_UNSAFE', rollback: { restored: false, residualDiffs: 1 } });
+        } else {
+          const code = variant === 'malformed' ? 'amazon-invalid-corridor' : variant === 'inverted' ? 'amazon-inverted-corridor' :
+            variant === 'unrestorable' ? 'amazon-unrestorable-value' : 'amazon-price-outside-corridor';
+          expect(report).toMatchObject({ status: 'blocked', updateBytes: null, rollbackBytes: null,
+            issues: expect.arrayContaining([expect.objectContaining({ code, baselineLine: 3 + embedded, candidateLine: 3 })]) });
+        }
+      },
+    ), { seed: seed + 64, numRuns: 1_000 });
+  }, 30_000);
+
+  it('finds exact-cent tax changes without floating-point conversion or losing physical lines', () => {
+    checkFuzz(fc.property(
+      fc.bigInt({ min: -99_999_999_999_999_999n, max: 99_999_999_999_999_999n }), fc.bigInt({ min: -99_999n, max: 99_999n }),
+      fc.constantFrom('verified', 'cent-positive', 'cent-negative', 'fraction', 'blank'), fc.integer({ min: 0, max: 7 }),
+      fc.constantFrom(['Subtotal', 'Tax', 'Gross'], ['Net', 'VAT Amount', 'Total'], ['Net before tax', 'Sales Tax', 'Total Amount']),
+      (net, tax, variant, embedded, headers) => {
+        const target = net + tax;
+        const shift = variant === 'cent-negative' ? -1n : variant === 'cent-positive' ? 1n : 0n;
+        const report = repairCsv(csvBytes(['Date', 'Payee', 'Amount', ...headers], [
+          ['2026-08-01', 'different\n'.repeat(embedded) + 'vendor', '1', '9', '1', '10'],
+          ['2026-08-02', 'another merchant', '2', variant === 'fraction' ? cents(net) + '5' : cents(net),
+            variant === 'blank' ? '' : cents(tax), cents(target + shift)],
+        ]), 'audit.csv', 'quickbooks-bank');
+        expect(report.rows.map(({ row }) => row)).toEqual([2, 3 + embedded]);
+        if (variant === 'verified') {
+          expect(report).toMatchObject({ canDownload: true, taxReconciliation: { status: 'VERIFIED', checkedRows: 2 } });
+        } else if (shift !== 0n) {
+          expect(report).toMatchObject({ canDownload: false, taxReconciliation: { mismatchCount: 1,
+            mismatches: [{ row: 3 + embedded, expectedGross: cents(target), delta: cents(shift) }] } });
+        } else {
+          expect(report).toMatchObject({ canDownload: false, taxReconciliation: { status: 'UNVERIFIABLE',
+            reasons: [{ row: 3 + embedded, column: variant === 'fraction' ? headers[0] : headers[1] }] } });
+        }
+      },
+    ), { seed: seed + 65, numRuns: 800 });
+  });
+
+  it('retains every exact group member while separating signs, currencies and source descriptions', () => {
+    checkFuzz(fc.property(
+      fc.integer({ min: 1, max: 900_000 }), fc.boolean(), fc.integer({ min: 0, max: 7 }),
+      fc.constantFrom('\r\n', '\n', '\r'), fc.constantFrom('pair', 'triple', 'sign', 'currency', 'descriptor', 'date'),
+      (amount, negative, embedded, ending, kind) => {
+        const net = BigInt(negative ? -amount : amount);
+        const text = Array.from({ length: embedded + 1 }, (_, index) => 'description ' + index).join(ending);
+        const start2 = 3 + embedded;
+        const start3 = start2 + embedded + 1;
+        const rows = [
+          ['2026-08-01', text, cents(net), '0', cents(net), 'USD', 'first'],
+          [kind === 'date' ? '2026-08-02' : '2026/08/01', kind === 'descriptor' ? text + ' ' : text,
+            cents(kind === 'sign' ? -net : net), '0.00', cents(kind === 'sign' ? -net : net) + '00', kind === 'currency' ? 'EUR' : 'USD', 'second'],
+        ];
+        if (kind === 'triple') rows.push(['2026-08-01', text, cents(net), '0', cents(net), 'USD', 'third']);
+        const report = repairCsv(csvBytes(['Date', 'Description', 'Gross', 'Fee', 'Net', 'Currency', 'Reference ID'], rows), 'settlement.csv', 'stripe-paypal');
+        const lines = kind === 'triple' ? [2, start2, start3] : [2, start2];
+        expect(report.rows.map(({ row }) => row)).toEqual(lines);
+        expect(report.removedRows).toEqual([]);
+        if (kind === 'pair' || kind === 'triple') {
+          expect(report).toMatchObject({ canDownload: false, duplicateTransactions: { affectedRows: lines.length,
+            groupCount: 1, groups: [{ lines, date: '2026-08-01', currency: 'USD', description: text }] } });
+          expect(report.issues.filter(({ code }) => code === 'FAIL_DUPLICATE_TRANSACTION').map(({ row }) => row)).toEqual(lines);
+        } else {
+          expect(report.canDownload).toBe(true);
+          expect(report.duplicateTransactions).toBeUndefined();
+        }
+      },
+    ), { seed: seed + 66, numRuns: 700 });
+  });
+});
+
+it('accounts for all 40,220 seeded executions without skips', () => {
+  expect(fuzzExecutions).toEqual({ accepted: 40_220, discarded: 0, properties: 67 });
   console.info(`Deterministic fuzz: ${fuzzExecutions.accepted} accepted, ${fuzzExecutions.discarded} discarded across ${fuzzExecutions.properties} properties.`);
 });

@@ -1,21 +1,21 @@
-import { useCallback, useId, useLayoutEffect, useRef, useState } from 'react';
-import type { StorePlatform } from '../../core/shopify-price-diff/workspace-profile';
+import { useId, useLayoutEffect, useRef, useState } from 'react';
+import type { ImportPlatform } from '../../core/verify-import/inspector';
 import type { WorkbenchWorker } from '../../core/worker/client';
 import type { InspectionSummary } from '../../core/worker/protocol';
+import { AMAZON_FILE_ERROR, AMAZON_FILE_EXTENSION, AMAZON_VERIFY_FIELDS } from './amazon/flatFileFields';
 import { BIGCOMMERCE_DEMO } from './bigCommerceDemo';
 import { CustodyFingerprints } from './CustodyFingerprints';
+import { InspectionIssues, InspectionRows } from './InspectionDetails';
 import { LocalCliCommand } from './LocalCliCommand';
-import { PAGE_SIZE, Pagination, usePagination } from './Pagination';
 import type { GeneratedPairSource } from './PriceDiffWorkbench';
 import { PriceFileInput } from './PriceFileInput';
-import { useWorkerPage } from './useWorkerPage';
 import { useWorkerSession, WorkerStatus } from './workerSession';
-import { STORE_PLATFORMS } from './WorkspaceProfile';
+import { PRICE_UPDATE_PLATFORMS } from './WorkspaceProfile';
 
 type FileRole = 'baseline' | 'candidate' | 'pairedUpdate';
 type CandidateKind = 'update' | 'rollback';
 type LocalInput = { file?: File; error?: string; synthetic?: boolean };
-type VerifyFiles = { platform: StorePlatform; baseline: File; candidate: File; pairedUpdate?: File };
+type VerifyFiles = { platform: ImportPlatform; baseline: File; candidate: File; pairedUpdate?: File };
 type Report = { summary: InspectionSummary; worker: WorkbenchWorker; files: VerifyFiles };
 type GeneratedFiles = Awaited<ReturnType<GeneratedPairSource['load']>>;
 
@@ -25,12 +25,10 @@ const FILE_FIELDS = {
   pairedUpdate: { title: 'Matching update CSV', formats: 'Drop the update that the rollback should reverse', label: 'Choose matching update CSV', accept: '.csv' },
 };
 
-const ISSUE_SOURCES = { baseline: 'Baseline', candidate: 'Candidate', update: 'Paired update' } as const;
-
-export default function VerifyImportPanel({ pairSource, buildPlatform }: { pairSource: GeneratedPairSource | null; buildPlatform: StorePlatform }) {
+export default function VerifyImportPanel({ pairSource, buildPlatform }: { pairSource: GeneratedPairSource | null; buildPlatform: ImportPlatform }) {
   const id = useId();
   const heading = useRef<HTMLHeadingElement>(null);
-  const [localPlatform, setLocalPlatform] = useState<StorePlatform>();
+  const [localPlatform, setLocalPlatform] = useState<ImportPlatform>();
   const [local, setLocal] = useState<Partial<Record<FileRole, LocalInput>>>({});
   const [selectedPair, setSelectedPair] = useState<GeneratedPairSource | null>(null);
   const [generated, setGenerated] = useState<GeneratedFiles | null>(null);
@@ -40,6 +38,9 @@ export default function VerifyImportPanel({ pairSource, buildPlatform }: { pairS
   const usingPair = selectedPair !== null && selectedPair === pairSource;
   const visibleReport = selectedPair === null || usingPair ? report : null;
   const platform = localPlatform ?? buildPlatform;
+  const amazon = platform === 'amazon';
+  const reportPlatform = usingPair ? selectedPair.platform : platform;
+  const amazonReport = reportPlatform === 'amazon';
   const baseline = local.baseline?.file;
   const candidate = local.candidate?.file;
   const matched = usingPair ? kind === 'rollback' : Boolean(local.pairedUpdate?.file);
@@ -57,12 +58,13 @@ export default function VerifyImportPanel({ pairSource, buildPlatform }: { pairS
     if (choices && !choices.length) return;
     reset();
     setReport(null);
+    const extension = amazon ? AMAZON_FILE_EXTENSION : /\.csv$/i;
     const input = choices
-      ? choices.length === 1 && /\.csv$/i.test(choices[0].name)
+      ? choices.length === 1 && extension.test(choices[0].name)
         ? { file: choices[0] }
-        : { error: 'Choose one file with a .csv extension.' }
+        : { error: amazon ? AMAZON_FILE_ERROR : 'Choose one file with a .csv extension.' }
       : undefined;
-    if (input?.file) setLocalPlatform(platform);
+    if (input) setLocalPlatform(platform);
     setLocal((previous) => ({ ...previous, [role]: input }));
   }
 
@@ -136,7 +138,8 @@ export default function VerifyImportPanel({ pairSource, buildPlatform }: { pairS
 
   function filePicker(role: FileRole, clearLabel: string) {
     const choice = local[role];
-    return <PriceFileInput side={`verify-${role}`} field={FILE_FIELDS[role]} file={choice?.file ? { file: choice.file, synthetic: choice.synthetic } : undefined}
+    const field = amazon ? AMAZON_VERIFY_FIELDS[role] : FILE_FIELDS[role];
+    return <PriceFileInput side={`verify-${role}`} field={field} file={choice?.file ? { file: choice.file, synthetic: choice.synthetic } : undefined}
       message={{ error: choice?.error }} onLoad={(files) => selectFile(role, files)} onClear={() => selectFile(role, null)} clearLabel={clearLabel} />;
   }
 
@@ -146,12 +149,19 @@ export default function VerifyImportPanel({ pairSource, buildPlatform }: { pairS
     else loadGeneratedPair();
   }
 
+  function commandPath(stem: string, file?: File) {
+    const extension = amazonReport ? file?.name.match(AMAZON_FILE_EXTENSION)?.[1].toLowerCase() ?? 'txt' : 'csv';
+    return `${stem}.${extension}`;
+  }
+
   return (
-    <section className="price-section verify-panel" aria-labelledby={id}>
+    <section className="price-section verify-panel" aria-labelledby={id} data-amazon={amazonReport}>
       <div className="price-heading">
         <div>
           <h2 id={id} ref={heading} tabIndex={-1}>Verify before import</h2>
-          <p className="field-help">Check product groups and exact price or stock changes against the original catalog export. Files stay in this browser.</p>
+          <p className="field-help">{amazonReport
+            ? 'Check exact price and quantity changes and the price corridor against the original Amazon Price & Quantity export. Files stay in this browser.'
+            : 'Check product groups and exact price or stock changes against the original catalog export. Files stay in this browser.'}</p>
         </div>
         <button className="button button-secondary" type="button" data-testid="verify-load-pair"
           disabled={!pairSource || Boolean(progress)} onClick={loadGeneratedPair}>Load last generated pair</button>
@@ -159,15 +169,15 @@ export default function VerifyImportPanel({ pairSource, buildPlatform }: { pairS
       {usingPair ? (
         <div className="verify-generated">
           <div className="verify-actions">
-            <div className="price-platform-toggle" role="group" aria-label="Generated candidate CSV">
+            <div className="price-platform-toggle" role="group" aria-label={amazonReport ? 'Generated Amazon candidate file' : 'Generated candidate CSV'}>
               <button type="button" aria-pressed={kind === 'update'} data-testid="verify-update" disabled={!generated || Boolean(progress)}
-                onClick={() => chooseCandidate('update')}>Update CSV</button>
+                onClick={() => chooseCandidate('update')}>{amazonReport ? 'Amazon Update File' : 'Update CSV'}</button>
               <button type="button" aria-pressed={kind === 'rollback'} data-testid="verify-rollback" disabled={!generated || Boolean(progress)}
-                onClick={() => chooseCandidate('rollback')}>Rollback CSV</button>
+                onClick={() => chooseCandidate('rollback')}>{amazonReport ? 'Amazon Rollback File' : 'Rollback CSV'}</button>
             </div>
-            <button type="button" className="text-button" onClick={useLocalFiles}>Use local CSV files</button>
+            <button type="button" className="text-button" onClick={useLocalFiles}>{amazonReport ? 'Use local files' : 'Use local CSV files'}</button>
           </div>
-          <p className="field-help">{STORE_PLATFORMS[selectedPair.platform]} baseline <strong>{selectedPair.baseline.name}</strong>
+          <p className="field-help">{PRICE_UPDATE_PLATFORMS[selectedPair.platform]} baseline <strong>{selectedPair.baseline.name}</strong>
             {selectedPair.market ? <> · Target <code>{selectedPair.market.priceHeader}</code></> : null}
             {generated ? <> · {kind === 'update' ? 'Update' : 'Rollback'} <strong>{generated[kind].name}</strong></> : null}</p>
         </div>
@@ -176,11 +186,13 @@ export default function VerifyImportPanel({ pairSource, buildPlatform }: { pairS
           <div className="price-sheet">
             <label htmlFor={`${id}-platform`}>Store platform</label>
             <select id={`${id}-platform`} value={platform} onChange={(event) => {
+              const next = event.currentTarget.value as ImportPlatform;
               reset();
               setReport(null);
-              setLocalPlatform(event.currentTarget.value as StorePlatform);
+              if (amazon || next === 'amazon') setLocal({});
+              setLocalPlatform(next);
             }}>
-              {Object.entries(STORE_PLATFORMS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+              {Object.entries(PRICE_UPDATE_PLATFORMS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
             </select>
           </div>
           {platform === 'bigcommerce' ? (
@@ -189,23 +201,23 @@ export default function VerifyImportPanel({ pairSource, buildPlatform }: { pairS
             </div>
           ) : null}
           <div className="price-files">
-            {filePicker('baseline', 'Clear baseline CSV')}
-            {filePicker('candidate', 'Clear update or rollback CSV')}
+            {filePicker('baseline', amazon ? 'Clear Amazon baseline file' : 'Clear baseline CSV')}
+            {filePicker('candidate', amazon ? 'Clear Amazon update or rollback file' : 'Clear update or rollback CSV')}
           </div>
           <details className="verify-paired-input">
             <summary>Check a rollback with its matching update{local.pairedUpdate?.file ? ' · Update selected'
               : local.pairedUpdate?.error ? ' · Check the selected file' : ''}</summary>
             <p className="field-help">Add the update the rollback must reverse. The candidate file above becomes the rollback for a local replay.</p>
-            {filePicker('pairedUpdate', 'Clear matching update CSV')}
+            {filePicker('pairedUpdate', amazon ? 'Clear matching Amazon update file' : 'Clear matching update CSV')}
           </details>
           <div className="verify-actions">
             <button className="button button-primary" type="button" data-testid="verify-submit"
               disabled={!baseline || !candidate || Boolean(local.pairedUpdate?.error) || Boolean(progress) || paused}
-              onClick={verifyLocal}>Verify CSV</button>
+              onClick={verifyLocal}>{amazon ? 'Verify Amazon File' : 'Verify CSV'}</button>
           </div>
         </>
       )}
-      {(usingPair ? selectedPair.platform : platform) === 'bigcommerce' ? <p className="field-help catalog-import-note">
+      {reportPlatform === 'bigcommerce' ? <p className="field-help catalog-import-note">
         Use the original legacy Bulk Edit export. Enable <strong>Ignore blank values</strong> when importing a verified file.
       </p> : null}
       <WorkerStatus progress={progress} paused={paused} finished={finished} error={error} focusHeading={id} onCancel={() => {
@@ -216,10 +228,10 @@ export default function VerifyImportPanel({ pairSource, buildPlatform }: { pairS
       {visibleReport ? <InspectionReport {...visibleReport} /> : null}
       <LocalCliCommand mode="verify" unavailable="Fix the selected file error to prepare the command."
         getArguments={() => !usingPair && Object.values(local).some(({ error }) => error) ? null : [
-          '--platform', usingPair ? selectedPair.platform : platform,
-          '--baseline', 'baseline.csv',
-          '--candidate', matched ? 'rollback.csv' : 'candidate.csv',
-          ...(matched ? ['--matched-update', 'matching-update.csv'] : []),
+          '--platform', reportPlatform,
+          '--baseline', commandPath('baseline', usingPair ? selectedPair.baseline : baseline),
+          '--candidate', commandPath(matched ? 'rollback' : 'candidate', usingPair ? generated?.[kind] : candidate),
+          ...(matched ? ['--matched-update', commandPath('matching-update', usingPair ? generated?.update : local.pairedUpdate?.file)] : []),
         ]}>
         {usingPair ? <p className="field-help">Save the generated candidate locally before running. For a rollback, also save the matching update.</p> : null}
       </LocalCliCommand>
@@ -231,6 +243,8 @@ function InspectionReport({ summary, worker, files }: Report) {
   const { rollback } = summary;
   const paired = rollback.scope === 'paired-update';
   const pass = summary.verdict === 'PASS';
+  const amazon = files.platform === 'amazon';
+  const format = amazon ? 'file' : 'CSV';
   const metrics = [
     ['matched-rows', 'Matched rows', summary.matchedRows],
     ['changed-rows', 'Changed rows', summary.changedRows],
@@ -247,9 +261,11 @@ function InspectionReport({ summary, worker, files }: Report) {
         <h3 id={id}>Verification result</h3>
         <strong className={`issue-badge ${pass ? 'badge-fixed' : 'badge-review'}`} data-testid="verify-verdict">{summary.verdict}</strong>
       </div>
-      <p className="field-help">{pass ? 'The candidate passed the local CSV safety checks.' : 'The candidate failed a safety check. Fix the issues before importing.'}</p>
+      <p className="field-help">{pass
+        ? amazon ? 'The candidate passed the local Amazon file safety checks.' : 'The candidate passed the local CSV safety checks.'
+        : 'The candidate failed a safety check. Fix the issues before importing.'}</p>
       <dl className="verify-metrics">
-        {metrics.map(([field, label, value]) => (
+        {metrics.filter(([field]) => !amazon || (field !== 'unchanged-siblings' && field !== 'broken-groups')).map(([field, label, value]) => (
           <div key={field}>
             <dt>{label}</dt>
             <dd data-testid={`verify-metric-${field}`}>{value.toLocaleString('en-US')}</dd>
@@ -274,91 +290,12 @@ function InspectionReport({ summary, worker, files }: Report) {
         )}
       </div>
       <CustodyFingerprints key={`${summary.baselineSha256}:${summary.candidateSha256}:${rollback.pairedUpdateSha256 ?? ''}`} open entries={[
-        { field: 'baseline', label: 'Baseline CSV', sha256: summary.baselineSha256, detail: files.baseline.name },
-        { field: 'candidate', label: 'Candidate CSV', sha256: summary.candidateSha256, detail: files.candidate.name },
-        { field: 'paired-update', label: 'Paired update CSV', sha256: rollback.pairedUpdateSha256, detail: files.pairedUpdate?.name },
+        { field: 'baseline', label: `Baseline ${format}`, sha256: summary.baselineSha256, detail: files.baseline.name },
+        { field: 'candidate', label: `Candidate ${format}`, sha256: summary.candidateSha256, detail: files.candidate.name },
+        { field: 'paired-update', label: `Paired update ${format}`, sha256: rollback.pairedUpdateSha256, detail: files.pairedUpdate?.name },
       ]} />
       <InspectionIssues worker={worker} total={summary.issueCount} />
-      <InspectionRows worker={worker} total={summary.rowCount} />
+      <InspectionRows worker={worker} total={summary.rowCount} amazon={amazon} />
     </section>
   );
-}
-
-function InspectionIssues({ worker, total }: { worker: WorkbenchWorker; total: number }) {
-  const id = useId();
-  const page = usePagination(total);
-  const read = useCallback(() => worker.request({ type: 'inspectionIssues', page: page.page, pageSize: PAGE_SIZE }), [worker, page.page]);
-  const data = useWorkerPage(total ? read : null);
-  if (!total) return null;
-
-  return (
-    <section className="verify-result-detail" aria-labelledby={id} data-testid="verify-issues">
-      <h3 id={id}>Safety issues ({total.toLocaleString('en-US')})</h3>
-      {data?.error ? <p className="file-error" role="alert">{data.error}</p> : data?.page ? (
-        <ul className="verify-issues">
-          {data.page.rows.map(({ source, code, message, line, column }, index) => (
-            <li key={page.start + index} data-issue-code={code}>
-              <p><strong>{ISSUE_SOURCES[source]}{line === undefined ? '' : ` line ${line}`}</strong>{column ? <> · <code>{column}</code></> : null}</p>
-              <p>{message}</p>
-              <code className="field-help">{code}</code>
-            </li>
-          ))}
-        </ul>
-      ) : <p className="empty-panel" role="status">Loading safety issues…</p>}
-      <Pagination state={page} total={total} label="Safety issue pages" />
-    </section>
-  );
-}
-
-function InspectionRows({ worker, total }: { worker: WorkbenchWorker; total: number }) {
-  const id = useId();
-  const page = usePagination(total);
-  const read = useCallback(() => worker.request({ type: 'inspectionRows', page: page.page, pageSize: PAGE_SIZE }), [worker, page.page]);
-  const data = useWorkerPage(total ? read : null);
-
-  return (
-    <section className="verify-result-detail" aria-labelledby={id} data-testid="verify-rows">
-      <h3 id={id}>Exact diff rows ({total.toLocaleString('en-US')})</h3>
-      {data?.error ? <p className="file-error" role="alert">{data.error}</p> : data?.page ? (
-        <div className="preview-card">
-          <div className="table-scroll" role="region" aria-labelledby={id} tabIndex={0}>
-            <table className="verify-table" aria-labelledby={id}>
-              <thead>
-                <tr><th scope="col">SKU / Product</th><th scope="col">Baseline line</th><th scope="col">Candidate line</th><th scope="col">Changed cells</th></tr>
-              </thead>
-              <tbody>
-                {data.page.rows.map(({ sku, product, baselineLine, candidateLine, changes }) => (
-                  <tr key={candidateLine}>
-                    <th scope="row"><code>{sku || 'No SKU'}</code><span className="price-row-detail">{product}</span></th>
-                    <td>{baselineLine}</td>
-                    <td>{candidateLine}</td>
-                    <td>
-                      <ul className="verify-changes">
-                        {changes.map(({ column, before, after, delta }) => (
-                          <li key={column}>
-                            <strong>{column}</strong>
-                            <dl>
-                              <div><dt>Before</dt><dd><CsvCell value={before} /></dd></div>
-                              <div><dt>After</dt><dd><CsvCell value={after} /></dd></div>
-                              <div><dt>Delta</dt><dd><CsvCell value={delta} missing="Unavailable" /></dd></div>
-                            </dl>
-                          </li>
-                        ))}
-                      </ul>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      ) : <p className="empty-panel" role="status">{total ? 'Loading diff rows…' : 'No changed rows to display.'}</p>}
-      <Pagination state={page} total={total} label="Exact diff row pages" />
-    </section>
-  );
-}
-
-function CsvCell({ value, missing = 'Column absent' }: { value: string | null; missing?: string }) {
-  if (value === null || value === '') return <span className="blank-cell">{value === null ? missing : 'Empty'}</span>;
-  return <code>{value}</code>;
 }

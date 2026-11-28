@@ -79,9 +79,22 @@ For example, `{"1":{"3":{"skip":true}}}` applies a skip to physical line 3 of th
 
 Saved recipes carry supported settings and mappings. Check a carried FX rate, confirm the current inputs, and resolve any row or supplier conflicts for this batch. Output files are `price-update.csv`, `price-rollback.csv`, `price-audit.json`, and `client-sign-off.html`. Held runs retain diagnostic JSON and the review HTML when available. A valid batch with no changes can complete without the pair. [Price Diff rules, recipes, and BOM](shopify-price-diff.md)
 
+### Amazon price diff
+
+Give `--platform amazon`, `--baseline <csv|tsv|txt>`, and exactly one `--supplier <csv|tsv|txt>` for the proposed changes. The proposal uses the canonical `sku`, `price`, and `quantity` fields. The Amazon path applies the supplied price limits and exact SKU matching directly from the files. Supplier recipes and pricing formulas are for the other catalog platforms. [Amazon flat-file scope](amazon-price-diff.md)
+
+```sh
+npm run --silent repair-cli -- --mode price-diff --platform amazon --baseline fixtures/amazon/price-quantity.tsv --supplier fixtures/amazon/proposed.csv --out-dir ./batches/amazon-demo
+npm run --silent repair-cli -- --mode verify --platform amazon --baseline fixtures/amazon/price-quantity.tsv --candidate ./batches/amazon-demo/amazon-rollback.tsv --matched-update ./batches/amazon-demo/amazon-update.tsv --out-dir ./batches/amazon-verify
+```
+
+Check `price-audit.json` and the custody manifest beside `amazon-update.tsv` and `amazon-rollback.tsv`. The native pair uses the baseline's comma or tab delimiter. A held batch exits `2` and writes the audit and manifest with original source lines. A verified rollback check writes `verify-report.json` and its own manifest. Use fresh output directories for each run.
+
 ## verify
 
 Use `--platform <shopify|woocommerce|bigcommerce>`, `--baseline <csv>`, and `--candidate <csv>`. To check a rollback against the update it is meant to reverse, give the rollback as `--candidate` and the update as `--matched-update <csv>`. It writes `verify-report.json` with `PASS` or `FAIL_UNSAFE`, and the batch manifest. [Verify Before Import contract](shopify-price-diff.md#verify-before-import)
+
+For `--platform amazon`, the same flags accept flat files using the baseline's tab or comma delimiter. [Amazon matched rollback example](#amazon-price-diff)
 
 ## promo
 

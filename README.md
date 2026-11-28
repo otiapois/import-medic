@@ -2,7 +2,9 @@
 
 ImportMedic compares a Shopify, WooCommerce, or legacy BigCommerce product export with one to three supplier CSV or XLSX files in your browser. Use supplier prices directly or calculate retail prices from wholesale costs, with optional manual currency conversion, cost brackets, and stock updates where supported. Attach a bundle bill of materials to recalculate kit costs when component prices change. Review proposed changes and competing offers before downloading matched update and rollback CSVs, audits, or a standalone Client Sign-Off HTML report. Save supplier mappings and store defaults as separate JSON files. A separate workbench repairs Shopify Products, QuickBooks Online Bank, Stripe or PayPal, Xero bank statement, and FreshBooks expense CSVs and offers a printable Bookkeeper Sign-Off HTML report.
 
-**Verify Before Import** inspects an existing update or rollback CSV against the original Shopify, WooCommerce, or legacy BigCommerce export. It checks product identity and grouping, shows exact changes in the allowed price or stock cells, and fingerprints both files in the browser. Store checks and imports take place in the store's admin.
+**Amazon Seller Central** compares a legacy Price & Quantity TSV or CSV with one local proposal file. It checks prices against the supplied minimum and maximum and prepares a matched update and rollback in the baseline delimiter.
+
+**Verify Before Import** inspects an existing update or rollback against the original Shopify, WooCommerce, legacy BigCommerce, or Amazon Price & Quantity file. It checks SKU identity, allowed price and stock changes, and catalog grouping where applicable. It fingerprints the supplied files in the browser. Store checks and imports take place in the store's admin.
 
 **Sale Campaign Pack** prepares a discount and its matched revert from one product export. It previews the final sale prices against a required minimum retail floor and packages the pair with a JSON audit and offline Campaign Sign-Off report.
 
@@ -28,13 +30,21 @@ Open the price update workbench and choose **Load Synthetic Agency Demo** for a 
 
 ### Verify an update or rollback before import
 
-1. Open **Verify Update / Rollback CSV** in the price workbench, choose the matching catalog platform, then add the original export and the candidate CSV. You can inspect files someone else prepared without rebuilding the batch.
+1. Open **Verify Update / Rollback CSV** in the price workbench, choose the matching catalog platform, then add the original export and candidate file. For Amazon select **Amazon Seller Central** and use the baseline's tab or comma delimiter. You can inspect files someone else prepared without rebuilding the batch.
 2. Read **PASS** or **FAIL_UNSAFE**, compare both SHA-256 fingerprints with the files you received, and review each changed SKU and its exact before-and-after values. Check the allowed native columns, product or variation identities, and group rules. A change from `20.00` to `20.000` still changes the cell text.
 3. If you generated the pair in the current workbench batch, choose **Load last generated pair** and verify the update and rollback in their respective tabs. For a saved pair, choose the rollback as the candidate and add the update under **Check a rollback with its matching update**. ImportMedic applies the actual update, applies the rollback, and compares the full result with the original catalog data.
 
 With a baseline and candidate alone, zero residual differences means the supplied scoped cells agree with the original values. To verify that a rollback covers and reverses a particular update, use the actual matched update. Check the intended values and the current catalog before importing either file. Store login and live changes happen in the store's admin.
 
 Open **Shortcuts (?)** or press `?` outside text entry. Press `/` to focus workbench search when available. Use `Escape` to close the dialog or cancel an active edit and return to its trigger. The dialog has a switch to turn off single-character shortcuts.
+
+### Prepare an Amazon Price & Quantity update
+
+1. In **Build Update**, choose **Amazon Seller Central** and select **Load Synthetic Amazon Demo**, or supply a legacy Price & Quantity baseline and one proposal file. Tab-delimited `.tsv` or `.txt` and comma-delimited `.csv` are supported. Use exact `sku` text and a `price` or `quantity` column in the proposal. Keep leading zeros when preparing the files.
+2. Review the proposed values and source lines. Prices outside a supplied minimum or maximum, invalid or inverted limits, and quantity changes for offers the baseline identifies as Amazon-fulfilled hold the native pair. The price limits are inclusive. A write also requires a restorable original value.
+3. Keep **Download Amazon Update File**, **Download Amazon Rollback File**, and **Download Amazon Audit JSON** with the baseline. The pair uses the baseline delimiter and contains exact `sku` values and scoped `price` or `quantity` writes. In **Verify Update / Rollback CSV**, select Amazon and replay the actual rollback with its matching update. The replay checks recovery of the original catalog cells, including handling time and other fields outside the write scope. [Amazon adapter contract](docs/subsystems/amazon-price-diff.md)
+
+Seller Central offers a separate generated `.xlsx` Price & Quantity template. Confirm the required format and fulfillment rules in the destination account before using any file. ImportMedic checks the supplied local flat files and has no account, marketplace, or FBA integration. [Legacy Price & Quantity file](https://sellercentral.amazon.com/help/hub/reference/external/G200385490?locale=en-US) · [Generated Price & Quantity template](https://sellercentral.amazon.com/help/hub/reference/external/GP2SE99TZ8SLDS7G?locale=en-US)
 
 ### Prepare a sale and its revert
 
@@ -168,7 +178,9 @@ The check measures consistency between the rows supplied. The opening balance is
 
 Open the home workbench, select the platform, and repair the CSV. For a Stripe or PayPal reconciliation mismatch, review Gross, Fee, Net, and the expected Net on the original source line. Correct the source or re-export it from the provider before retrying. If you reopen a generic accounting CSV with confirmed PayPal signed fees, select the PayPal option under **Fee convention**. If multiple currencies prevent a QuickBooks bank export, use the counts and physical lines in **Mixed currencies block QuickBooks export** to locate transactions in the source. Prepare a separate input for each currency and check it again before using the bank layout.
 
-Use **Download Bookkeeper Sign-Off (.html)** to open or print the standalone report locally, including for a held CSV. It records the current repair state, source and platform, automatic and manual edit counts, physical CSV lines, exclusions, and totals by verified currency where available. Reconciliation mismatches, currency groups, and running-balance results appear when applicable. Keep the current report with its source file and JSON audit. When the CSV is held, the report carries the original file fingerprint only.
+In **Issues & Review**, use **Tax Reconciliation (Net + Tax == Gross)** to check whether the pre-tax subtotal plus tax equals gross on each applicable line. Even a one-cent difference holds the CSV. In a payment report, a fee-adjusted Net belongs to the separate fee check. Use **Duplicate Transaction Alerts** to compare the original line pairs for records that share a normalized date, exact signed amount, and applicable payee and description fields within compatible currency data. Confirm the transactions against the original records. The repair holds the CSV and keeps the flagged rows available for review. [Tax and duplicate checks](docs/subsystems/csv-engine.md#tax-and-duplicate-transaction-checks)
+
+Use **Download Bookkeeper Sign-Off (.html)** to open or print the standalone report locally, including for a held CSV. It records the current repair state, source and platform, automatic and manual edit counts, physical CSV lines, exclusions, and totals by verified currency where available. Tax, duplicate, fee, currency, and running-balance evidence appears when applicable. Keep the current report with its source file and JSON audit. When the CSV is held, the report carries the original file fingerprint only.
 
 ### Verify file fingerprints
 
@@ -187,8 +199,8 @@ Use a separate output directory for each run. All eight explicit modes write `cu
 | Mode | Use it to prepare |
 | --- | --- |
 | `repair` | A repaired CSV, JSON audit, and offline Bookkeeper Sign-Off |
-| `price-diff` | A matched catalog update and rollback, JSON audit, and offline Client Sign-Off |
-| `verify` | A JSON inspection of a candidate CSV against its baseline, with optional matched rollback replay |
+| `price-diff` | A matched catalog or Amazon flat-file update and rollback, JSON audit, and offline Client Sign-Off where available |
+| `verify` | A JSON inspection of a candidate file against its baseline, with optional matched rollback replay |
 | `promo` | Matched sale launch and revert CSVs, JSON audit, and offline campaign sign-off |
 | `supplier-delta` | A supplier review CSV, JSON audit, and offline delta sign-off |
 | `migrate` | A creation CSV, JSON audit, and offline migration sign-off |
@@ -198,6 +210,8 @@ Use a separate output directory for each run. All eight explicit modes write `cu
 Exit `0` means the local run passed. Exit `2` means the run held the CSV or rejected the candidate and left diagnostic files. Exit `1` means an argument, input/output, or execution error. The unsigned manifest lists the SHA-256 of the original input bytes and each emitted result. Keep it with the originals and outputs to check for byte changes.
 
 Pass a saved Supplier Recipe JSON to `price-diff` with its supplier file. Review the current mapping, worksheet, and any currency or conflict settings before confirming them for this batch. For earlier single-file scripts, omitting `--mode` preserves `--platform`, the CSV stream on stdout or `--output`, and the optional `--audit` JSON. [CLI commands, options, and exit codes](docs/subsystems/cli-automation.md)
+
+For an Amazon Price & Quantity batch, run `price-diff` with `--platform amazon` and a single proposal file. Use the actual downloaded pair as inputs for `verify` with the original baseline. [Runnable Amazon TSV and CSV example](docs/subsystems/cli-automation.md#amazon-price-diff)
 
 ## Verify local processing
 

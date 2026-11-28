@@ -1,8 +1,9 @@
+import { auditTaxReconciliation, trackDuplicateTransactions } from '../accounting/tax-duplicate';
 import type { Journal } from '../journal';
 import { expectedPaymentNet } from '../repair/reconciliation';
 import { auditProjection, columnIndex, headerAliases, requireColumn, type Table } from '../table';
 import type { FeeConvention, RepairOptions } from '../types';
-import { inferDateOrder, isZeroAmount, normalizeDate, normalizeDescription, repairAmount, reviewCurrencies } from '../values';
+import { inferDateOrder, isZeroAmount, normalizeDescription, repairAmount, repairDate, reviewCurrencies } from '../values';
 import { QUICKBOOKS_3COL } from './quickbooks-bank';
 
 export const stripePayPalAliases = headerAliases({
@@ -53,10 +54,6 @@ export function repairStripePayPal(table: Table, journal: Journal, options: Repa
   const description = columnIndex(table, 'Description');
   const reference = columnIndex(table, 'Reference ID');
   const impact = columnIndex(table, 'Balance Impact');
-  if (date === undefined || net === undefined || currency === undefined || (!qbo && (gross === undefined || fee === undefined))) {
-    return table.headers;
-  }
-
   if (impact !== undefined) {
     table.rows = table.rows.filter((row) => {
       if (row.invalid || row.cells[impact].trim().toLowerCase() !== 'memo') return true;
@@ -70,12 +67,17 @@ export function repairStripePayPal(table: Table, journal: Journal, options: Repa
       return true;
     });
   }
+  auditTaxReconciliation(table, journal, true);
+  if (date === undefined || net === undefined || currency === undefined || (!qbo && (gross === undefined || fee === undefined))) {
+    return table.headers;
+  }
 
   const rows = table.rows.filter(({ invalid }) => !invalid);
   const dateOrder = inferDateOrder(rows.map(({ cells }) => cells[date]), options.dateOrder);
   const outputOrder = qbo ? options.dateOrder === 'DMY' ? 'DMY' : 'MDY' : 'ISO';
   const headers = qbo ? QUICKBOOKS_3COL : ACCOUNTING_HEADERS;
   const usedHeaders = new Set(qbo ? ['Date', 'Description', 'Net'] : headers);
+  const duplicateAudit = trackDuplicateTransactions(table, journal, ['Description']);
   auditProjection(table, usedHeaders, journal);
   journal.fix(
     'layout-converted',
@@ -92,7 +94,7 @@ export function repairStripePayPal(table: Table, journal: Journal, options: Repa
     const cells = row.cells;
     const currencyCode = rowCurrencies.get(row);
     const amountOptions = { blockInvalid: qbo, currencyCode };
-    const dateValue = normalizeDate(cells[date], journal, { row: line, column: 'Date' }, dateOrder, outputOrder, { allowTimestamp: true, blockInvalid: qbo });
+    const dateValue = repairDate(cells[date], journal, { row: line, column: 'Date' }, dateOrder, outputOrder, { allowTimestamp: true, blockInvalid: qbo });
     const repairedNet = repairAmount(cells[net], line, 'Net', journal, { ...amountOptions, nonzero: qbo });
     const netValue = repairedNet.value;
     const grossAmount = gross === undefined ? undefined : repairAmount(cells[gross], line, 'Gross', journal, amountOptions);
@@ -110,16 +112,17 @@ export function repairStripePayPal(table: Table, journal: Journal, options: Repa
     const sourceDescription = description === undefined ? '' : cells[description];
     const balanceImpact = impact === undefined ? undefined : cells[impact].trim().toLowerCase();
 
+    const reportable = expectedNet === undefined && (balanceImpact === undefined || ((balanceImpact === 'credit' || balanceImpact === 'debit') &&
+      (!repairedNet.valid || isZeroAmount(netValue) || (balanceImpact === 'debit') === netValue.startsWith('-'))));
+    if (reportable && repairedNet.valid) duplicateAudit?.record(row, dateValue.iso, netValue, cells[net], currencyCode);
     if (qbo) {
       if (impact !== undefined) reviewBalanceImpact(cells[impact], cells[net], repairedNet, line, journal);
-      row.after = [dateValue, normalizeDescription(sourceDescription, journal, line), netValue];
+      row.after = [dateValue.value, normalizeDescription(sourceDescription, journal, line), netValue];
       journal.change('layout-converted', line, 'Amount', cells[net], netValue, 'Used the source Net amount for QuickBooks Amount.');
     } else {
-      row.after = [dateValue, sourceDescription, grossAmount?.value ?? '', feeAmount?.value ?? '', netValue, currencyCode ?? cells[currency], reference === undefined ? '' : cells[reference]];
+      row.after = [dateValue.value, sourceDescription, grossAmount?.value ?? '', feeAmount?.value ?? '', netValue, currencyCode ?? cells[currency], reference === undefined ? '' : cells[reference]];
     }
     if (journal.bookkeeperAmounts && balanceImpact !== 'memo') {
-      const reportable = expectedNet === undefined && (balanceImpact === undefined || ((balanceImpact === 'credit' || balanceImpact === 'debit') &&
-        (!repairedNet.valid || isZeroAmount(netValue) || (balanceImpact === 'debit') === netValue.startsWith('-'))));
       journal.bookkeeperAmounts.push({ row: line, currency: currencyCode ?? null, amounts: {
         gross: reportable && grossAmount?.valid ? grossAmount.value : undefined,
         fee: reportable && feeAmount?.valid ? feeAmount.value : undefined,
@@ -128,5 +131,6 @@ export function repairStripePayPal(table: Table, journal: Journal, options: Repa
     }
   }
 
+  duplicateAudit?.finish();
   return headers;
 }

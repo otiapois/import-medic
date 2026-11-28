@@ -1,4 +1,5 @@
 import { sha256 } from '../audit/custody';
+import { inspectAmazonImport } from '../amazon-price-diff';
 import { bigCommerceProductTracking, bigCommerceValueIssues, readBigCommerceStock } from '../bigcommerce-price-diff/safety';
 import {
   bigCommerceFileLimit, bigCommerceIdentityHeaders, bigCommerceKey, bigCommerceSkuHeader, bigCommerceStockHeader, bigIdHeader, bigPriceHeader, bigSaleHeader,
@@ -25,7 +26,11 @@ export interface ImportInspectionIssue {
   message: string;
   line?: number;
   column?: string;
+  baselineLine?: number;
+  candidateLine?: number;
 }
+
+export type ImportPlatform = StorePlatform | 'amazon';
 
 export interface ImportDiffRow {
   sku: string;
@@ -347,8 +352,9 @@ function inspectCandidate(source: 'candidate' | 'update', bytes: Uint8Array, bas
 }
 
 export async function inspectImport(
-  platform: StorePlatform, baselineCsvBytes: Uint8Array, candidateCsvBytes: Uint8Array, pairedUpdateCsvBytes?: Uint8Array,
+  platform: ImportPlatform, baselineCsvBytes: Uint8Array, candidateCsvBytes: Uint8Array, pairedUpdateCsvBytes?: Uint8Array,
 ): Promise<ImportInspection> {
+  if (platform === 'amazon') return inspectAmazonImport(baselineCsvBytes, candidateCsvBytes, pairedUpdateCsvBytes);
   // Start hashing and inspect the same views before yielding to the caller.
   const fingerprints = Promise.all([
     sha256(baselineCsvBytes), sha256(candidateCsvBytes), pairedUpdateCsvBytes && sha256(pairedUpdateCsvBytes),

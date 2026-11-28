@@ -23,6 +23,8 @@ const reviewRepair = fixture('shopify/invalid-variant-price.csv');
 // Cold tsx startup competes with the other Vitest workers on Windows.
 const costCreepSpawnTimeout = 40_000;
 const costCreepTestTimeout = 100_000;
+const m21SpawnTimeout = 40_000;
+const m21TestTimeout = 100_000;
 let scratch: string;
 
 beforeAll(() => {
@@ -47,8 +49,8 @@ function cli(args: string[], cwd = root, timeout = 15_000) {
 }
 
 function verifyReceipt(mode: string, code: 0 | 2, status: string, directory: string,
-  args: string[], inputs: Record<string, string>, outputFiles: string[], cwd?: string) {
-  const run = cli(['--mode', mode, ...args, '--out-dir', directory], cwd, mode === 'cost-creep' ? costCreepSpawnTimeout : undefined);
+  args: string[], inputs: Record<string, string>, outputFiles: string[], cwd?: string, timeout = mode === 'cost-creep' ? costCreepSpawnTimeout : undefined) {
+  const run = cli(['--mode', mode, ...args, '--out-dir', directory], cwd, timeout);
   const outputPath = resolve(cwd ?? root, directory);
   const diagnostic = run.status === 2 && code !== 2
     ? readdirSync(outputPath).filter(name => /(?:-audit|-report)\.json$/.test(name)).map(name => readFileSync(resolve(outputPath, name), 'utf8')).join('\n')
@@ -78,6 +80,62 @@ function verifyReceipt(mode: string, code: 0 | 2, status: string, directory: str
 
 const pricingHeaders = 'Handle,Title,Option1 Name,Option1 Value,Variant SKU,Variant Price,Variant Compare At Price,Cost per item\n';
 const catalog = (price: string) => pricingHeaders + `part,Spare Part,Title,Default Title,0001,${price},,5.00\nkit,Bundle,Title,Default Title,KIT,20.00,,10.00\n`;
+
+describe('M21 native CLI subprocess', () => {
+  it('writes Amazon text files and independently verifies the matched rollback', () => {
+    const baseline = content('amazon-base.txt', readFileSync(fixture('amazon/price-quantity.tsv')));
+    const supplier = fixture('amazon/proposed.csv');
+    const built = resolve(scratch, 'amazon-built');
+    const update = resolve(built, 'amazon-update.txt');
+    const rollback = resolve(built, 'amazon-rollback.txt');
+    verifyReceipt('price-diff', 0, 'ready', built, ['--platform', 'amazon', '--baseline', baseline, '--supplier', supplier],
+      { baseline, supplier }, ['amazon-update.txt', 'amazon-rollback.txt', 'price-audit.json'], root, m21SpawnTimeout);
+    expect(readFileSync(update, 'utf8')).toBe('sku\tprice\tquantity\r\n00007\t11.25\t0\r\n00008\t19.99\t');
+    expect(readFileSync(rollback, 'utf8')).toBe('sku\tprice\tquantity\r\n00007\t010.00\t007\r\n00008\t20.00\t');
+    const verified = resolve(scratch, 'amazon-verified');
+    verifyReceipt('verify', 0, 'PASS', verified,
+      ['--platform', 'amazon', '--baseline', baseline, '--candidate', rollback, '--matched-update', update],
+      { baseline, candidate: rollback, 'matched-update': update }, ['verify-report.json'], root, m21SpawnTimeout);
+    expect(JSON.parse(readFileSync(resolve(verified, 'verify-report.json'), 'utf8'))).toMatchObject({ verdict: 'PASS', nonTargetMutations: 0,
+      rollback: { restored: true, residualDiffs: 0, pairedUpdateSha256: digest(readFileSync(update)) } });
+  }, m21TestTimeout);
+
+  it('holds out-of-corridor Amazon files in build and standalone verify', () => {
+    const baseline = fixture('amazon/price-quantity.tsv');
+    const supplier = fixture('amazon/outside-corridor.tsv');
+    const built = resolve(scratch, 'amazon-held');
+    verifyReceipt('price-diff', 2, 'blocked', built, ['--platform', 'amazon', '--baseline', baseline, '--supplier', supplier],
+      { baseline, supplier }, ['price-audit.json'], root, m21SpawnTimeout);
+    const audit = JSON.parse(readFileSync(resolve(built, 'price-audit.json'), 'utf8'));
+    expect(audit).toMatchObject({ issues: [{ code: 'amazon-price-outside-corridor', baselineLine: 2, candidateLine: 4 }] });
+    expect(audit.custody).not.toHaveProperty('updateSha256');
+    const verified = resolve(scratch, 'amazon-unsafe');
+    verifyReceipt('verify', 2, 'FAIL_UNSAFE', verified,
+      ['--platform', 'amazon', '--baseline', baseline, '--candidate', supplier],
+      { baseline, candidate: supplier }, ['verify-report.json'], root, m21SpawnTimeout);
+    expect(JSON.parse(readFileSync(resolve(verified, 'verify-report.json'), 'utf8'))).toMatchObject({ verdict: 'FAIL_UNSAFE',
+      issues: [{ code: 'amazon-price-outside-corridor', baselineLine: 2, candidateLine: 4 }] });
+  }, m21TestTimeout);
+
+  it('holds the same tax mismatch and duplicates in explicit and legacy repair', () => {
+    const source = fixture('accounting/tax-duplicate.csv');
+    const held = resolve(scratch, 'accounting-held');
+    verifyReceipt('repair', 2, 'blocked', held, ['--platform', 'quickbooks-bank', source, '--generated-at', instant],
+      { source }, ['repair-audit.json', 'bookkeeper-sign-off.html'], root, m21SpawnTimeout);
+    const audit = JSON.parse(readFileSync(resolve(held, 'repair-audit.json'), 'utf8'));
+    expect(audit).toMatchObject({ retainedRowCount: 3, canDownload: false,
+      taxReconciliation: { mismatchCount: 1, mismatches: [{ row: 4, delta: '0.01' }] },
+      duplicateTransactions: { groupCount: 1, affectedRows: 2, groups: [{ lines: [2, 4] }] } });
+    expect(audit.custody).not.toHaveProperty('repairedCsvSha256');
+    expect(readFileSync(resolve(held, 'bookkeeper-sign-off.html'), 'utf8')).toContain('<td>2, 4</td>');
+    const legacy = resolve(scratch, 'accounting-legacy-audit.json');
+    const run = cli(['--platform', 'quickbooks-bank', source, '--audit', legacy], root, m21SpawnTimeout);
+    expect(run.status).toBe(2);
+    expect(run.stdout).toBe('');
+    expect(JSON.parse(readFileSync(legacy, 'utf8'))).toMatchObject({
+      taxReconciliation: audit.taxReconciliation, duplicateTransactions: audit.duplicateTransactions });
+  }, m21TestTimeout);
+});
 
 describe('M20 real cost-creep CLI subprocess', () => {
   it('writes exact branded reports or holds every analysis artifact on ambiguous data', () => {

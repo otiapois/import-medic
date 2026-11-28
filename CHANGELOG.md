@@ -1,5 +1,11 @@
 # Changelog
 
+## v2.1.0 (M21)
+
+- Choose **Amazon Seller Central** in Price Update Studio to compare a legacy Price & Quantity TSV or CSV with a proposed change file. Review price limits and original source lines before downloading the matched, same-delimiter files. In Verify Before Import, check each scoped change and replay the actual rollback against its matching update.
+- The accounting workbench checks `Net/subtotal + Tax == Gross` with exact integer arithmetic when the source supplies the relevant amounts. It also flags repeated transaction keys with the original physical line pairs. A mismatch or unresolved duplicate holds the repaired CSV and retains the evidence in the workbench, JSON audit, and offline Bookkeeper Sign-Off.
+- The existing local CLI `price-diff` and `verify` modes accept `--platform amazon`. The single-file `repair` mode carries the same tax and duplicate evidence into its batch reports.
+
 ## v2.0.0 (M20)
 
 - Open **Multi-Period Cost Creep (2–6 sheets)** inside **Supplier Delta** to compare chronological supplier CSV or XLSX pricebooks. Review cumulative cost increases, consecutive hikes, and changes in SKU availability. Add a store retail CSV to compare gross margins where the costs and retail are in the same known currency.

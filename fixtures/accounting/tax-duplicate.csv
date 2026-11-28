@@ -1,0 +1,6 @@
+Date,Description,Amount,Subtotal,Tax,Gross,Currency
+2026-06-01,"Vendor <sample>
+continued",110.00,100.00,10.00,110.00,USD
+2026/06/01,"Vendor <sample>
+continued",110.000,100.00,10.00,110.01,USD
+2026-06-01,Refund entry,-110.00,-100.00,-10.00,-110.00,USD

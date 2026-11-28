@@ -1,7 +1,8 @@
+import { auditTaxReconciliation, trackDuplicateTransactions } from '../accounting/tax-duplicate';
 import type { Journal } from '../journal';
 import { auditProjection, columnIndex, headerAliases, requireColumn, type Table } from '../table';
 import type { FreshBooksTaxRow, RepairOptions } from '../types';
-import { currencyFractionDigits, normalizeDate, repairAmount, reviewCurrencies } from '../values';
+import { currencyFractionDigits, repairAmount, repairDate, reviewCurrencies } from '../values';
 
 const requiredColumns = ['Date', 'Vendor', 'Category', 'Notes', 'Amount', 'Currency'] as const;
 const nativeColumns = ['Date', 'Vendor', 'Category', 'Notes', 'Amount', 'Tax 1 Name', 'Tax 1 Amount', 'Currency'];
@@ -18,6 +19,7 @@ export const freshBooksAliases = headerAliases({
 });
 
 export function repairFreshBooks(table: Table, journal: Journal, options: RepairOptions, collectTaxes: boolean): string[] {
+  auditTaxReconciliation(table, journal);
   const required = requiredColumns.map((column) => requireColumn(table, column, journal));
   if (required.some((index) => index === undefined)) return table.headers;
   const [date, vendor, category, notes, amount, currency] = required as number[];
@@ -28,12 +30,13 @@ export function repairFreshBooks(table: Table, journal: Journal, options: Repair
   const decimals = new Map([...new Set(currencies.values())].map((code) => [code, currencyFractionDigits(code)]));
   const inputOrder = options.dateOrder === 'auto' ? undefined : options.dateOrder;
   const taxes: FreshBooksTaxRow[] = [];
+  const duplicateAudit = trackDuplicateTransactions(table, journal, ['Vendor', 'Notes']);
   let firstSign: boolean | undefined;
   auditProjection(table, new Set(nativeColumns), journal);
   for (const row of rows) {
     const line = row.source.line;
     const currencyCode = currencies.get(row);
-    const dateValue = normalizeDate(row.cells[date], journal, { row: line, column: 'Date' }, inputOrder, 'ISO', { blockInvalid: true });
+    const dateValue = repairDate(row.cells[date], journal, { row: line, column: 'Date' }, inputOrder, 'ISO', { blockInvalid: true });
     const rawAmount = row.cells[amount];
     const movement = repairAmount(rawAmount, line, 'Amount', journal, {
       blockInvalid: true, nonzero: true, currencyCode, allowTrailingMinus: true, layoutName: 'FreshBooks expense CSV',
@@ -47,6 +50,7 @@ export function repairFreshBooks(table: Table, journal: Journal, options: Repair
       }
     }
     if (validAmount) {
+      duplicateAudit?.record(row, dateValue.iso, movement.value, rawAmount, currencyCode);
       const negative = movement.value.startsWith('-');
       firstSign ??= negative;
       if (firstSign !== negative) {
@@ -59,9 +63,10 @@ export function repairFreshBooks(table: Table, journal: Journal, options: Repair
     const tax = taxAmount === undefined ? '' : row.cells[taxAmount];
     if (collectTaxes && (name || tax)) taxes.push({ row: line, name, amount: tax });
     const taxValue = repairAmount(tax, line, 'Tax 1 Amount', journal, { required: false, currencyCode, allowTrailingMinus: true }).value;
-    row.after = [dateValue, row.cells[vendor], row.cells[category], row.cells[notes], movement.value, name, taxValue, currencyCode ?? row.cells[currency]];
+    row.after = [dateValue.value, row.cells[vendor], row.cells[category], row.cells[notes], movement.value, name, taxValue, currencyCode ?? row.cells[currency]];
     journal.bookkeeperAmounts?.push({ row: line, currency: currencyCode ?? null, amounts: validAmount ? { amount: movement.value } : {} });
   }
+  duplicateAudit?.finish();
   if (taxes.length > 0) journal.freshBooksTaxes = taxes;
   return nativeColumns;
 }

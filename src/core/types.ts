@@ -34,6 +34,9 @@ export interface RepairIssue {
   ruleDocSlug: string;
   editable?: boolean;
   reconciliation?: { gross: string; fee: string; net: string; expectedNet: string; feeConvention: FeeConvention };
+  taxReconciliation?: TaxLineAmounts;
+  relatedLines?: readonly number[];
+  duplicateGroup?: number;
 }
 
 export interface CellChange {
@@ -102,6 +105,29 @@ export interface FreshBooksTaxRow {
   amount: string;
 }
 
+export interface TaxLineAmounts {
+  net: string;
+  tax: string;
+  gross: string;
+  expectedGross: string;
+  delta: string;
+}
+
+export interface TaxReconciliation {
+  status: 'VERIFIED' | 'FAIL_TAX_MISMATCH' | 'UNVERIFIABLE';
+  checkedRows: number;
+  mismatchCount: number;
+  unverifiableCount: number;
+  mismatches: readonly (TaxLineAmounts & { row: number })[];
+  reasons: readonly { row: number; column: string; message: string }[];
+}
+
+export interface DuplicateTransactions {
+  groupCount: number;
+  affectedRows: number;
+  groups: readonly { lines: readonly number[]; date: string; amount: string; currency: string | null; description: string }[];
+}
+
 export interface RepairResult {
   filename: string;
   platform: PlatformId;
@@ -121,6 +147,8 @@ export interface RepairResult {
   bookkeeperAmounts: readonly BookkeeperAmountRow[];
   balanceChain?: BalanceChain;
   freshBooksTaxes?: readonly FreshBooksTaxRow[];
+  taxReconciliation?: TaxReconciliation;
+  duplicateTransactions?: DuplicateTransactions;
   currencySplit?: readonly { currency: string; lines: readonly number[] }[];
   stripePayPalFeeConvention?: FeeConvention;
 }

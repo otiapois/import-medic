@@ -105,6 +105,8 @@ The standalone inspector compares an original Shopify, WooCommerce, or legacy Bi
 
 With only a baseline and candidate, the inspector can confirm exact agreement for included scoped cells. Full recovery uses the verified, matched update as a third input. The verifier applies that update to the original catalog data, applies the rollback, and checks the resulting cells throughout the original matrix. The standalone baseline check concerns the supplied file, and the paired replay concerns the supplied update and rollback. Store import and verification of the current catalog are manual steps.
 
+**Amazon Seller Central** uses the same inspector entry point for legacy Price & Quantity flat files. The baseline, candidate, and optional matching update use a common tab or comma delimiter. [Amazon identity, supported fields, and price limits](amazon-price-diff.md#verify-before-import)
+
 For a Sale Campaign Pack, use Promo Launch as the update and Promo End Revert as the rollback. WooCommerce and legacy BigCommerce campaign candidates can carry sale prices alone, alongside their required identity columns. [Campaign field and clear rules](promo-campaign.md#native-csv-scope)
 
 ## Supplier recipes and local worker

@@ -12,6 +12,8 @@ export class Journal {
   currencySplit?: RepairResult['currencySplit'];
   balanceChain?: RepairResult['balanceChain'];
   freshBooksTaxes?: RepairResult['freshBooksTaxes'];
+  taxReconciliation?: RepairResult['taxReconciliation'];
+  duplicateTransactions?: RepairResult['duplicateTransactions'];
 
   constructor(private readonly platform: PlatformId, collectBookkeeperAmounts = false) {
     if (collectBookkeeperAmounts) this.bookkeeperAmounts = [];
@@ -23,8 +25,8 @@ export class Journal {
     column: string,
     rawValue: string,
     message: string,
-    { fixedValue, editable = false, block = false, reconciliation }:
-    Pick<RepairIssue, 'fixedValue' | 'editable' | 'reconciliation'> & { block?: boolean } = {},
+    { fixedValue, editable = false, block = false, reconciliation, taxReconciliation, relatedLines, duplicateGroup }:
+    Pick<RepairIssue, 'fixedValue' | 'editable' | 'reconciliation' | 'taxReconciliation' | 'relatedLines' | 'duplicateGroup'> & { block?: boolean } = {},
   ): void {
     const key = `${code}:${row}:${column}`;
     const count = (this.idCounts.get(key) ?? 0) + 1;
@@ -42,6 +44,9 @@ export class Journal {
       ruleDocSlug: ruleDocSlug(code, this.platform),
       editable,
       ...(reconciliation && { reconciliation }),
+      ...(taxReconciliation && { taxReconciliation }),
+      ...(relatedLines && { relatedLines }),
+      ...(duplicateGroup !== undefined && { duplicateGroup }),
     });
     this.blocked ||= block;
   }

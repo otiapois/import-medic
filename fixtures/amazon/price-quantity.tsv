@@ -1,0 +1,5 @@
+sku	price	minimum-seller-allowed-price	maximum-seller-allowed-price	quantity	handling-time	fulfillment-channel	note
+00007	010.00	9.50	11.25	007	002	DEFAULT	"Existing seller offer
+quoted second line"
+00008	20.00			0		DEFAULT	Existing sibling
+FBA-9	30.00				005	AMAZON_NA	Existing Amazon offer

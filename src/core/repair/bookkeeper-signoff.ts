@@ -120,6 +120,25 @@ ${reasons.length > rowLimit ? `<p>Showing ${rowLimit} of ${reasons.length} reaso
 </section>`;
 }
 
+function renderTaxReconciliation(tax: NonNullable<RepairResult['taxReconciliation']>): string {
+  const { checkedRows, mismatchCount, unverifiableCount, mismatches, reasons, status } = tax;
+  return `<section><h2>Tax reconciliation (Net + Tax == Gross)</h2>
+<p><strong class="${status === 'VERIFIED' ? 'chain-verified' : 'chain-held'}">${escape(status)}</strong> · ${checkedRows} checked · ${mismatchCount} mismatched · ${unverifiableCount} unverifiable</p>
+${mismatches.length ? `<table><thead><tr><th scope="col">Line</th><th scope="col">Net / subtotal</th><th scope="col">Tax</th><th scope="col">Gross / total</th><th scope="col">Expected gross</th><th scope="col">Discrepancy</th></tr></thead><tbody>
+${mismatches.map(({ row, net, tax, gross, expectedGross, delta }) => `<tr><th scope="row">${row}</th>${[net, tax, gross, expectedGross, delta].map(value => `<td>${boundedText(value)}</td>`).join('')}</tr>`).join('')}
+</tbody></table>` : ''}
+${reasons.length ? `<ul>${reasons.map(({ row, column, message }) => `<li>Line ${row} · ${boundedText(column)} · ${boundedText(message)}</li>`).join('')}</ul>` : ''}
+</section>`;
+}
+
+function renderDuplicates(duplicates: NonNullable<RepairResult['duplicateTransactions']>): string {
+  return `<section><h2>Duplicate transaction alerts</h2>
+<p><strong class="chain-held">${duplicates.affectedRows} rows in ${duplicates.groupCount} duplicate groups</strong>. All flagged rows are retained for review. The source totals include the retained duplicate rows.</p>
+<table><thead><tr><th scope="col">Group</th><th scope="col">Physical source lines</th><th scope="col">Date</th><th scope="col">Signed amount</th><th scope="col">Payee / description</th></tr></thead><tbody>
+${duplicates.groups.map(({ lines, date, amount, currency, description }, index) => `<tr><th scope="row">${index + 1}</th><td>${lines.join(', ')}</td><td>${escape(date)}</td><td>${boundedText(amount)}${currency ? ' ' + escape(currency) : ''}</td><td>${boundedText(description)}</td></tr>`).join('')}
+</tbody></table></section>`;
+}
+
 export function createBookkeeperSignoffHtml(result: RepairResult, { generatedAt, generatedAtDisplay, detectedProvider, options, custody, branding }: ReportContext): string {
   const fourColumn = options ? options.qboLayout === '4col' : result.headers.includes('Credit');
   const target = result.platform === 'shopify-products' ? 'Shopify products' :
@@ -157,7 +176,7 @@ ${result.platform === 'stripe-paypal' && options?.stripePayPalOutput === 'quickb
 <dl class="summary">${metrics.map(([label, value]) => `<div><dt>${label}</dt><dd>${value}</dd></div>`).join('')}</dl>
 <p class="meta">Total rows include retained and excluded CSV records, after omitting the header record. Cell counts use distinct source cells. Layout, header, encoding and line-ending notices appear in the audit where applicable.</p>
 ${result.balanceChain ? renderBalanceChain(result.balanceChain) : ''}
-<h2>Totals by currency</h2>
+${result.taxReconciliation ? renderTaxReconciliation(result.taxReconciliation) + '\n' : ''}${result.duplicateTransactions ? renderDuplicates(result.duplicateTransactions) + '\n' : ''}<h2>Totals by currency</h2>
 ${currencyRows ? `<table><thead><tr><th scope="col">Currency</th><th scope="col">Lines</th>${moneyFields.map((field) => `<th scope="col">${field[0].toUpperCase() + field.slice(1)}</th>`).join('')}</tr></thead><tbody>${currencyRows}</tbody></table>` : '<p>No monetary totals are available.</p>'}
 ${result.platform === 'shopify-products' ? '<p class="meta">The product repair supplies no transaction amounts or currency totals.</p>' : `<p class="meta">Totals use validated source amounts under their explicit currency, before any export removes the source currency column. ${result.rows.length - included} retained ${result.rows.length - included === 1 ? 'line has' : 'lines have'} no reportable amount. A dash means that amount is unavailable for the currency.</p>`}
 <h2>Source line audit</h2>

@@ -2,8 +2,9 @@ import { lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSyn
 import { basename, dirname, join, parse, resolve, sep } from 'node:path';
 import { parseArgs } from 'node:util';
 import { z } from 'zod';
+import { amazonFileExtension } from '../src/core/amazon-price-diff';
 import { sha256, type RepairCustody } from '../src/core/audit/custody';
-import { cliModes, createCustodyManifest, dispatchCli, storePlatforms, type CliArtifact, type CliInventorySupplier, type CliRequest, type DeltaSource, type PriceSupplier } from '../src/core/cli/dispatch';
+import { cliModes, createCustodyManifest, dispatchCli, importPlatforms, storePlatforms, type CliArtifact, type CliInventorySupplier, type CliRequest, type DeltaSource, type PriceSupplier } from '../src/core/cli/dispatch';
 import { isSafeFileName, isSafeLocalPath } from '../src/core/cli/paths';
 import { PLATFORM_IDS, repairCsvWithBytes } from '../src/core/index';
 import { hasDuplicateKeys, profileText } from '../src/core/shopify-price-diff/settings-validation';
@@ -117,8 +118,8 @@ const allOptions = Object.fromEntries([...new Set([...sharedFlags, ...Object.val
 
 const modeUsage = {
   repair: '--platform <repair-platform> <input.csv>',
-  'price-diff': '--platform <store> --baseline <csv> --supplier <csv|xlsx> [--sheet <name>] [--recipe <json>] …',
-  verify: '--platform <store> --baseline <csv> --candidate <csv> [--matched-update <csv>]',
+  'price-diff': '--platform <store|amazon> --baseline <csv> --supplier <csv|xlsx> [--sheet <name>] [--recipe <json>] … (Amazon takes one proposal; each file may be csv|tsv|txt)',
+  verify: '--platform <store|amazon> --baseline <csv> --candidate <csv> [--matched-update <csv>] (Amazon also accepts tsv|txt)',
   promo: '--platform <store> --baseline <csv> --discount-mode <percent-off|fixed-amount-off> --discount-amount <decimal> --minimum-retail <decimal> [--cost-sheet <csv|xlsx>]',
   'supplier-delta': '--previous <csv|xlsx> --next <csv|xlsx> [--previous-sheet <name>] [--next-sheet <name>]',
   'inventory-sync': '--baseline <csv> --supplier <csv|xlsx> [--sheet <name>] --sku-column <header|1-based position> --quantity-column <header|1-based position> … [--target-location <name>]',
@@ -293,7 +294,15 @@ async function explicitMain(args: string[]) {
       break;
     }
     case 'price-diff': {
-      const platform = store('platform');
+      const platform = z.enum(importPlatforms).parse(required('platform'));
+      if (platform === 'amazon') {
+        const amazonFlags = new Set([...sharedFlags, 'platform', 'baseline', 'supplier']);
+        for (const name of seen) if (!amazonFlags.has(name)) throw new Error(`Option --${name} does not apply to Amazon price-diff.`);
+        if (repeated('supplier').length !== 1) throw new Error('Provide exactly one Amazon proposal with --supplier.');
+        request = { mode, platform, baseline: read('baseline', option('baseline'), amazonFileExtension),
+          proposal: read('supplier', option('supplier'), amazonFileExtension) };
+        break;
+      }
       const groups = groupedInputs('supplier', supplierFlags);
       const supplierNumber = (value: string) => {
         const index = number(value);
@@ -326,9 +335,13 @@ async function explicitMain(args: string[]) {
         storeLabel: text(named('store-label')), options: { market, conflictPolicy, conflictPolicyConfirmed: flag('confirm-conflict-policy') } };
       break;
     }
-    case 'verify':
-      request = { mode, platform: store('platform'), baseline: source('baseline'), candidate: source('candidate'), matchedUpdate: optional('matched-update') };
+    case 'verify': {
+      const platform = z.enum(importPlatforms).parse(required('platform'));
+      const extension = platform === 'amazon' ? amazonFileExtension : csv;
+      request = { mode, platform, baseline: read('baseline', option('baseline'), extension), candidate: read('candidate', option('candidate'), extension),
+        matchedUpdate: option('matched-update') === undefined ? undefined : read('matched-update', option('matched-update'), extension) };
       break;
+    }
     case 'promo': {
       const rounding = z.enum(['none', 'ending-99', 'ending-95', 'nearest-whole']).parse(option('rounding') ?? 'none');
       const discount = z.enum(['percent-off', 'fixed-amount-off']).parse(required('discount-mode'));

@@ -8,6 +8,22 @@ const groupedDecimalSchema = z.string().regex(/^\d{1,3}(?:,\d{3})+(?:\.\d+)?$/);
 const currencySchema = z.string().regex(/^[A-Z]{3}$/);
 const isoCurrencies = new Set(Intl.supportedValuesOf('currency'));
 
+export const isKnownCurrency = (code: string): boolean => isoCurrencies.has(code);
+
+// Normalized decimal input may contain trailing zeros beyond the required scale.
+export function readMinorUnits(value: string | undefined, scale: number): bigint | undefined {
+  if (value === undefined) return undefined;
+  const [whole, fraction = ''] = value.split('.');
+  const significant = fraction.replace(/0+$/, '');
+  return significant.length > scale ? undefined : BigInt(whole + significant.padEnd(scale, '0'));
+}
+
+export function formatMinorUnits(value: bigint, scale: number): string {
+  if (scale === 0) return value.toString();
+  const magnitude = (value < 0n ? -value : value).toString().padStart(scale + 1, '0');
+  return (value < 0n ? '-' : '') + magnitude.slice(0, -scale) + '.' + magnitude.slice(-scale);
+}
+
 function splitAmount(source: string, allowTrailingMinus = false) {
   let value = source.trim();
   const parenthesized = value.startsWith('(') && value.endsWith(')');

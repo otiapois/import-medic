@@ -28,7 +28,9 @@ export function decodeCsv(bytes: Uint8Array): { text: string; encoding: Detected
   }
 }
 
-export function parseCsv(text: string): { records: CsvRecord[]; lineEnding: DetectedLineEnding } {
+export type CsvDelimiter = ',' | '\t';
+
+export function parseCsv(text: string, delimiter: CsvDelimiter = ','): { records: CsvRecord[]; lineEnding: DetectedLineEnding } {
   const endings = [...text.matchAll(/\r\n|\n|\r/g)];
   const kinds = new Set<string>();
   const normalized = text.replace(/\r\n|\r/g, '\n');
@@ -38,7 +40,7 @@ export function parseCsv(text: string): { records: CsvRecord[]; lineEnding: Dete
   let endingIndex = 0;
 
   Papa.parse<string[]>(normalized, {
-    delimiter: ',',
+    delimiter,
     newline: '\n',
     dynamicTyping: false,
     step({ data, errors, meta }) {
@@ -76,9 +78,9 @@ export function serializeCsv(headers: readonly string[], rows: readonly (readonl
   return serializeCsvRecords([headers, ...rows], platform);
 }
 
-export function serializeCsvRecords(records: readonly (readonly string[])[], platform: string): string {
+export function serializeCsvRecords(records: readonly (readonly string[])[], platform: string, delimiter: CsvDelimiter = ','): string {
   return Papa.unparse(records.map((row) => Array.from(row)), {
-    delimiter: ',',
+    delimiter,
     newline: platform === 'shopify-products' ? '\n' : '\r\n',
     // Leave content intact, including leading minus signs on bank amounts.
     escapeFormulae: false,
