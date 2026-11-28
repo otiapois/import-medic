@@ -227,6 +227,27 @@ The first command exits `0` and writes `categorized-transactions.csv`, `account-
 
 The second command exits `2`. Check physical line 2 for the conflicting rule IDs `aws-uk` and `aws-overlap`. The directory contains only `categorization-audit.json` and `custody-manifest.json`. [Inputs, split arithmetic, and review files](categorization.md)
 
+## wholesale-sheet
+
+Give `--platform <shopify|woocommerce|bigcommerce>`, `--baseline <catalog.csv>`, and `--options <options.json>`. The options file sets the seller label, effective date, currency, tier definitions, exact existing Shopify catalog title, and selected Shopify tier. It can set a minimum gross margin and require MAP on every SKU.
+
+| Flag | Value or use |
+| --- | --- |
+| `--cost-sheet <csv|xlsx>` | Additional cost, MAP, case pack, and MOQ values by SKU. |
+| `--cost-sheet-tab` or `--cost-sheet-tab-b64` | Exact visible worksheet for the XLSX cost sheet. |
+| `--workspace-profile <profile.json>` | Apply saved Agency Sign-Off Branding to the buyer HTML. |
+
+Run these commands in distinct, fresh output directories.
+
+```sh
+npm run --silent repair-cli -- --mode wholesale-sheet --platform shopify --baseline fixtures/m24/wholesale-shopify.csv --options fixtures/m24/wholesale-options.json --cost-sheet fixtures/m24/wholesale-costs.csv --out-dir ./batches/wholesale-demo
+npm run --silent repair-cli -- --mode wholesale-sheet --platform shopify --baseline fixtures/m24/wholesale-shopify.csv --options fixtures/m24/wholesale-options.json --cost-sheet fixtures/m24/wholesale-map-hold.csv --out-dir ./batches/wholesale-hold
+```
+
+The first command exits `0`. Check SKU `00007` for Bronze, Silver, and Gold unit prices of `39.96`, `34.97`, and `29.97` USD and minimum order quantities of `12`, `54`, and `102`. The Shopify CSV addresses `Northstar Wholesale Silver` and carries the Silver price `34.97` and quantity fields `6` and `54` for this SKU. Review the buyer files against the public field list. Compare the catalog, cost sheet, and four export hashes against the internal audit. Check the CLI manifest for every file, including the exact options JSON and audit hashes.
+
+The second command exits `2`. The `35.00` MAP for `00007` holds Silver and Gold. Check the physical line 2 evidence and confirm the directory contains only `wholesale-margin-audit.json` and `custody-manifest.json`. [Tier rules, buyer fields, and Shopify review](wholesale-pricelist.md)
+
 ## Legacy single-file repair
 
 Keep `--mode` absent for the original single-file interface.

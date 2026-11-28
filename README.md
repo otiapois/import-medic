@@ -8,6 +8,8 @@ ImportMedic compares a Shopify, WooCommerce, or legacy BigCommerce product expor
 
 **Sale Campaign Pack** prepares a discount and its matched revert from one product export. It previews the final sale prices against a required minimum retail floor and packages the pair with a JSON audit and offline Campaign Sign-Off report.
 
+**Wholesale B2B Line-Sheet** builds up to five tiers from a product export, checks rounded prices and ordering, and prepares a buyer matrix, printable offline sheet, and one-tier Shopify B2B catalog CSV. Use the separate internal margin files to review landed costs and floor checks.
+
 **Supplier Delta** compares two supplier pricebooks or tracks cost creep across two to six periods. Review hikes, drops, and SKU availability. In the multi-period view, add store retail data to check gross margin changes and download a Vendor Negotiation Brief for offline review.
 
 **Migrate Catalog** converts a supported product CSV between Shopify, WooCommerce, and BigCommerce. Review parent and variant rows, pricing, source fields that need separate handling, and the file fingerprints before downloading a creation CSV for the destination platform.
@@ -52,12 +54,19 @@ Seller Central offers a separate generated `.xlsx` Price & Quantity template. Co
 
 ### Prepare a sale and its revert
 
-1. Open **Sale Campaign Pack**, choose the catalog platform, and select a fresh product CSV or **Load Synthetic Promo Demo**. Use all priced rows or scope the campaign by SKU prefix or exact SKU list. Shopify also supports product handle and tag filters.
+1. Open **Sale Campaign Pack > Retail Promo Pack**, choose the catalog platform, and select a fresh product CSV or **Load Synthetic Promo Demo**. Use all priced rows or scope the campaign by SKU prefix or exact SKU list. Shopify also supports product handle and tag filters.
 2. Set a **Percent off** from `1` to `90` or a **Fixed amount off** in store currency, then select rounding and enter a positive **Minimum retail floor**. Shopify starts with the current variant price. WooCommerce and BigCommerce start with a lower existing sale price when present, or the regular price otherwise. ImportMedic applies the discount and rounds before checking the floor. A result below the floor, at or under zero, or at or above the starting price holds the pair. Change the settings or skip the affected row. The optional cost check flags a promo price below recorded cost for review.
 3. Review the before, promo, and revert cells. Shopify updates base variant price and compare-at price while preserving original titles, handles, options, SKUs, and sibling rows. WooCommerce updates `Sale price` while leaving `Regular price` in place. Legacy BigCommerce updates `Sale Price` on standalone `Product` rows with an original numeric sale price. The legacy **Ignore blank values during import** setting prevents an empty sale cell from clearing a price during revert, so a row with a blank original sale is held. [Native fields and exact clear behavior](docs/subsystems/promo-campaign.md#native-csv-scope)
 4. Keep the Promo Launch and Promo End Revert downloads with the original CSV, JSON audit, and Campaign Sign-Off HTML. Compare SHA-256 values against the actual downloaded files. In **Verify Update / Rollback CSV**, replay the actual launch followed by its matched revert to check that every original catalog cell is recovered locally.
 
 Schedule and import the files manually in the store's admin. Confirm the current prices and identities against the baseline before launch and against the matched launch before reverting. [Sale Campaign Pack contract](docs/subsystems/promo-campaign.md)
+
+### Prepare a wholesale buyer sheet
+
+1. Open **Sale Campaign Pack > Wholesale B2B Line-Sheet** and choose **Load Synthetic 3-Tier Wholesale Demo**, or add a Shopify, WooCommerce, or legacy BigCommerce product CSV. Add the optional landed cost and MAP CSV or XLSX. For a workbook with several visible sheets, select **Cost and MAP worksheet**.
+2. Set the seller, currency, and effective date. Configure one to five tiers with a minimum order quantity, percent-off-retail or cost-plus pricing, and rounding. Choose the **Shopify B2B tier** and enter the exact title of the existing destination catalog. Review **Internal margin review** for cost, minimum gross margin, MAP (Minimum Advertised Price), and higher-quantity tiers with higher prices. Correct a hold using the affected SKU, tier, and source line.
+3. Switch to **Buyer-safe preview** before sharing. Download the buyer matrix CSV and open the printable HTML offline. These use the buyer field list in the wholesale contract. Keep the margin audit, internal margin matrix, and CLI custody manifest with your internal files. [Wholesale pricing and file contract](docs/subsystems/wholesale-pricelist.md)
+4. Before using the Shopify catalog CSV, verify the destination catalog, currency, and SKU matches in Shopify admin. Review **Preview Import** for the chosen tier's fixed prices and quantity fields. [Shopify catalog CSV instructions](https://help.shopify.com/en/manual/b2b/catalogs/creating-catalogs#using-catalog-csv-files)
 
 ### Prepare a Shopify inventory update for one location
 
@@ -212,7 +221,7 @@ From the source checkout with its locked dependencies installed, use `npm run --
 npm run --silent repair-cli -- --mode repair --platform xero-bank fixtures/xero-bank/balance-verified.csv --out-dir ./batches/xero-demo
 ```
 
-Use a separate output directory for each run. All ten explicit modes write `custody-manifest.json` alongside their available results.
+Use a separate output directory for each run. All eleven explicit modes write `custody-manifest.json` alongside their available results.
 
 | Mode | Use it to prepare |
 | --- | --- |
@@ -226,6 +235,7 @@ Use a separate output directory for each run. All ten explicit modes write `cust
 | `cost-creep` | A multi-period supplier history CSV, JSON audit, and offline Vendor Negotiation Brief |
 | `purchase-order` | A supplier split PO pack with one CSV per chosen supplier, a consolidated summary, a JSON audit, and printable offline HTML |
 | `categorize` | A categorized transaction CSV, a per-currency account summary, a JSON audit, and offline Bookkeeper Categorization Sign-Off |
+| `wholesale-sheet` | A buyer matrix CSV, printable buyer HTML, a selected-tier Shopify catalog CSV, and separate internal margin files |
 
 Exit `0` means the local run passed. Exit `2` means the run held the CSV or rejected the candidate and left diagnostic files. Exit `1` means an argument, input/output, or execution error. The unsigned manifest lists the SHA-256 of the original input bytes and each emitted result. Keep it with the originals and outputs to check for byte changes.
 
@@ -236,6 +246,8 @@ For an Amazon Price & Quantity batch, run `price-diff` with `--platform amazon` 
 For a reorder batch, use `--mode purchase-order` with one inventory CSV and one to three supplier catalogs. Set the location, worksheet, and supplier policy for the current files. [Runnable PO split and hold examples](docs/subsystems/cli-automation.md#purchase-order)
 
 For a bookkeeping review batch, use `--mode categorize` with a transaction CSV and `--rules <rules.json>`. Compare the CSV and HTML bytes against the audit before resaving the downloads. [Runnable categorization and hold examples](docs/subsystems/cli-automation.md#categorize)
+
+For a wholesale batch, use `--mode wholesale-sheet` with a catalog CSV, tier options, and optional landed cost and MAP input. Check the audit and custody manifest for a hold or compare the ready outputs byte for byte with their reported hashes. [Runnable wholesale and hold examples](docs/subsystems/cli-automation.md#wholesale-sheet)
 
 ## Verify local processing
 

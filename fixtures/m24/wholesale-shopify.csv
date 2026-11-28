@@ -1,0 +1,5 @@
+Handle,Title,Option1 Name,Option1 Value,Variant SKU,Variant Price,Body (HTML),Variant Compare At Price
+travel-mug,"Travel Mug
+12 oz",Color,Ink,00007,49.95,<p>Example catalog note</p>,59.95
+travel-mug,,,Sand,00008,39.95,,
+canvas-tote,Canvas Tote,Title,Default Title,00009,29.95,,

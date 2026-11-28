@@ -20,8 +20,10 @@ import { inspectImport, type ImportPlatform } from '../verify-import/inspector';
 import { parseWooCommerceBaseline } from '../woocommerce-price-diff';
 import { repairAudit } from '../worker/repair-views';
 import { runPriceComparison } from '../whatif/simulator';
+import type { SignoffBrand } from '../branding/signoff-brand';
+import { buildWholesalePriceList, type WholesaleOptions } from '../wholesale-pricelist/engine';
 
-export const cliModes = ['repair', 'price-diff', 'verify', 'promo', 'supplier-delta', 'migrate', 'inventory-sync', 'cost-creep', 'purchase-order', 'categorize'] as const;
+export const cliModes = ['repair', 'price-diff', 'verify', 'promo', 'supplier-delta', 'migrate', 'inventory-sync', 'cost-creep', 'purchase-order', 'categorize', 'wholesale-sheet'] as const;
 export const storePlatforms = ['shopify', 'woocommerce', 'bigcommerce'] as const satisfies readonly StorePlatform[];
 export const importPlatforms = [...storePlatforms, 'amazon'] as const satisfies readonly ImportPlatform[];
 export type CliMode = typeof cliModes[number];
@@ -64,6 +66,7 @@ export type CliRequest =
   | { mode: 'inventory-sync'; baseline: CliFile; suppliers: CliInventorySupplier[]; options: InventorySyncOptions }
   | { mode: 'cost-creep'; periods: readonly CostCreepPeriod[]; options?: CostCreepOptions }
   | { mode: 'purchase-order'; baseline: CliFile; suppliers: readonly PurchaseOrderSupplier[]; options?: PurchaseOrderOptions }
+  | { mode: 'wholesale-sheet'; platform: StorePlatform; baseline: CliFile; options: WholesaleOptions; branding?: SignoffBrand }
   | ({ mode: 'categorize' } & CategorizationInput)
   | { mode: 'migrate'; source: CliFile; sourcePlatform: StorePlatform; targetPlatform: StorePlatform };
 
@@ -248,6 +251,16 @@ export async function dispatchCli(request: CliRequest): Promise<CliResult> {
       return promo.canExport && promo.launchCsv !== null && promo.revertCsv !== null && promo.signoffHtml !== null
         ? result('ready', report, artifact('sign-off', signoff, promo.signoffHtml), artifact('launch', launch, promo.launchCsv), artifact('revert', revert, promo.revertCsv))
         : result('blocked', report);
+    }
+    case 'wholesale-sheet': {
+      const { platform, baseline, options, branding } = request;
+      const { buyerCsv, shopifyCsv, lineSheetHtml, internalCsv, auditJson, fileNames } =
+        await buildWholesalePriceList(platform, baseline.bytes, options, branding);
+      const audit = artifact('audit', fileNames.audit, auditJson);
+      return buyerCsv !== null && shopifyCsv !== null && lineSheetHtml !== null && internalCsv !== null
+        ? result('ready', audit, artifact('buyer-csv', fileNames.buyer, buyerCsv), artifact('shopify-b2b-csv', fileNames.shopify, shopifyCsv),
+          artifact('buyer-line-sheet-html', fileNames.lineSheet, lineSheetHtml), artifact('internal-margin-csv', fileNames.internal, internalCsv))
+        : result('blocked', audit);
     }
     case 'supplier-delta': return supplierDelta(request.previous, request.next);
     case 'cost-creep': {

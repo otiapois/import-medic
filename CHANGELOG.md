@@ -1,5 +1,11 @@
 # Changelog
 
+## v2.4.0 (M24)
+
+- Open **Sale Campaign Pack > Wholesale B2B Line-Sheet** to configure up to five tiers from a Shopify, WooCommerce, or legacy BigCommerce catalog. Calculate percent-off-retail or cost-plus prices and review cost, gross-margin, MAP, and tier-order checks before sharing the sheet.
+- Download a buyer price matrix, a printable offline line sheet, and a selected-tier catalog CSV for an existing Shopify B2B catalog. Keep the separate margin audit and internal matrix within the agency or merchant team. Review the destination catalog and SKU mapping in Shopify before importing.
+- Run the same checks with `repair-cli --mode wholesale-sheet`. A hold returns exit `2`, keeps the audit and custody manifest, and withholds price sheets. The seeded suite covers tier rounding and order, price floors, buyer fields, and escaped HTML.
+
 ## v2.3.0 (M23)
 
 - Open **Auto-Categorize Rules** in the home workbench to apply reusable local rule packs to transaction CSVs. Match literal payee or description text, transaction direction, and optional amount bounds to assign account and tax codes. Review unmatched transactions and hold batches with conflicting rules or unmatched amounts above a configured threshold.

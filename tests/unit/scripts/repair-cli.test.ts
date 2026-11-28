@@ -9,6 +9,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { repairCsvWithBytes } from '../../../src/core';
 import { parseCsv } from '../../../src/core/csv';
 import { createSupplierRecipe, serializeSupplierRecipe } from '../../../src/core/shopify-price-diff/recipe';
+import { serializeWorkspaceProfile } from '../../../src/core/shopify-price-diff/workspace-profile';
 import { listWorkbookSheets } from '../../../src/core/xlsx';
 
 const root = fileURLToPath(new URL('../../../', import.meta.url));
@@ -84,6 +85,56 @@ function verifyReceipt(mode: string, code: 0 | 2, status: string, directory: str
 
 const pricingHeaders = 'Handle,Title,Option1 Name,Option1 Value,Variant SKU,Variant Price,Variant Compare At Price,Cost per item\n';
 const catalog = (price: string) => pricingHeaders + `part,Spare Part,Title,Default Title,0001,${price},,5.00\nkit,Bundle,Title,Default Title,KIT,20.00,,10.00\n`;
+
+describe('M24 wholesale-sheet CLI subprocess', () => {
+  const baseline = fixture('m24/wholesale-shopify.csv');
+  const options = fixture('m24/wholesale-options.json');
+  const workbook = fixture('m24/wholesale-costs.xlsx');
+  const unsafe = fixture('m24/wholesale-map-hold.csv');
+  const auditName = 'wholesale-margin-audit.json';
+  const defaults = ['--platform', 'shopify', '--baseline', baseline, '--options', options];
+  const files = [auditName, 'northstar-supply-wholesale-buyer-sheet.csv', 'northstar-supply-shopify-b2b-catalog.csv',
+    'northstar-supply-wholesale-line-sheet.html', 'northstar-supply-wholesale-margin-matrix.csv'];
+
+  it('publishes a branded ready 3-tier pack with verified receipts for the workbook, options and every artifact', () => {
+    const output = resolve(scratch, 'wholesale-ready');
+    const profile = content('wholesale-brand.json', serializeWorkspaceProfile({ version: 1, storeName: 'Northstar Supply',
+      platform: 'shopify', storeCurrency: 'USD',
+      branding: { agencyName: 'Example Design', preparedFor: '', contactNote: '', accentKey: 'navy' } }));
+    verifyReceipt('wholesale-sheet', 0, 'ready', output, [...defaults, '--cost-sheet', workbook, '--cost-sheet-tab', 'Wholesale Costs',
+      '--workspace-profile', profile], { baseline, options, 'cost-sheet': workbook, 'workspace-profile': profile }, files, undefined, 40_000);
+    const [auditRaw, buyer, shopify, html, merchant] = files.map(name => readFileSync(resolve(output, name), 'utf8'));
+    const audit = JSON.parse(auditRaw);
+    expect(audit.selectedWorksheet).toBe('Wholesale Costs');
+    expect(audit.custody).toMatchObject({ baselineSha256: digest(readFileSync(baseline)), costSheetSha256: digest(readFileSync(workbook)),
+      buyerSha256: digest(Buffer.from(buyer)), shopifySha256: digest(Buffer.from(shopify)), lineSheetSha256: digest(Buffer.from(html)),
+      internalSha256: digest(Buffer.from(merchant)) });
+    expect(parseCsv(buyer).records[1].cells.slice(0, 4)).toEqual(['00007', 'Travel Mug\n12 oz', '6', '12']);
+    expect(parseCsv(shopify).records[1].cells).toEqual(['Northstar Wholesale Silver', '00007', '', '', '34.97', '6', '54']);
+    expect(html).toContain('Example Design');
+    expect(merchant).toContain('17.31');
+    for (const output of [buyer, shopify, html]) expect(output).not.toMatch(/17\.31|Landed Cost|Gross Margin|SHA-256/);
+  }, 120_000);
+
+  it('publishes only the diagnostic audit and manifest on MAP and margin holds', () => {
+    const mapPath = resolve(scratch, 'wholesale-map-hold');
+    verifyReceipt('wholesale-sheet', 2, 'blocked', mapPath, [...defaults, '--cost-sheet', unsafe],
+      { baseline, options, 'cost-sheet': unsafe }, [auditName], undefined, 40_000);
+    const mapAudit = JSON.parse(readFileSync(resolve(mapPath, auditName), 'utf8'));
+    expect(mapAudit.issues[0]).toMatchObject({ code: 'below-map', tierName: 'Silver', sku: '00007', line: 2, baselineLine: 2, costLine: 2 });
+    expect(mapAudit.custody).toEqual({ baselineSha256: digest(readFileSync(baseline)), costSheetSha256: digest(readFileSync(unsafe)),
+      buyerSha256: null, shopifySha256: null, lineSheetSha256: null, internalSha256: null });
+    const marginPath = resolve(scratch, 'wholesale-margin-hold');
+    const marginOptions = content('wholesale-margin-options.json', JSON.stringify({ ...JSON.parse(readFileSync(options, 'utf8')),
+      minimumMarginPercent: '80' }));
+    const safe = fixture('m24/wholesale-costs.csv');
+    verifyReceipt('wholesale-sheet', 2, 'blocked', marginPath,
+      ['--platform', 'shopify', '--baseline', baseline, '--options', marginOptions, '--cost-sheet', safe],
+      { baseline, options: marginOptions, 'cost-sheet': safe }, [auditName], undefined, 40_000);
+    const marginAudit = JSON.parse(readFileSync(resolve(marginPath, auditName), 'utf8'));
+    expect(marginAudit.issues[0]).toMatchObject({ code: 'below-minimum-margin', sku: '00007', tierName: 'Bronze' });
+  }, 120_000);
+});
 
 describe('M23 categorization CLI subprocess', () => {
   const source = fixture('m23/transactions.csv');

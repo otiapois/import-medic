@@ -2,6 +2,8 @@
 
 [`buildPromoCampaign`](../../src/core/promo-campaign/engine.ts) takes a platform, the original bytes of one catalog CSV, and campaign options. The campaign uses the uploaded store's own price fields. An optional cost sheet supplies review data. Work stays in the browser.
 
+Choose **Sale Campaign Pack > Retail Promo Pack** to use this workflow. The adjacent **Wholesale B2B Line-Sheet** builds separate tier prices and buyer documents. [Wholesale pricing and file contract](wholesale-pricelist.md)
+
 ## Scope and calculation
 
 - With no filters, the campaign considers priced rows. A case-sensitive SKU prefix or exact SKU list narrows the scope. Shopify can also narrow by product handle and product tag. When several filters are supplied, a row must match all of them.

@@ -1,0 +1,14 @@
+{
+  "brandLabel": "Northstar Supply",
+  "currency": "USD",
+  "effectiveDate": "2026-10-01",
+  "shopifyCatalogTitle": "Northstar Wholesale Silver",
+  "shopifyTierName": "Silver",
+  "minimumMarginPercent": "20",
+  "requireMap": true,
+  "tiers": [
+    { "tierName": "Bronze", "discountMode": "percent-off-retail", "value": "20", "minOrderQty": "10", "rounding": "none" },
+    { "tierName": "Silver", "discountMode": "percent-off-retail", "value": "30", "minOrderQty": "50", "rounding": "none" },
+    { "tierName": "Gold", "discountMode": "percent-off-retail", "value": "40", "minOrderQty": "100", "rounding": "none" }
+  ]
+}

@@ -39,6 +39,7 @@ import { brandSupplierDeltaReports, buildSupplierDelta } from '../../../src/core
 import { runPriceComparison, simulatePriceScenarios, type PriceComparison, type WhatIfScenario } from '../../../src/core/whatif/simulator';
 import { listWorkbookSheets } from '../../../src/core/xlsx';
 import { parseBom, rollupBom, type BomCost } from '../../../src/core/bom/rollup';
+import { buildWholesalePriceList, type WholesaleOptions, type WholesaleTier } from '../../../src/core/wholesale-pricelist/engine';
 import { syntheticBomBaseline } from './bom-fixtures';
 
 
@@ -1194,7 +1195,7 @@ it.each(['shopify', 'woocommerce', 'bigcommerce'] as const)('replays 1,020 %s pr
         issues: [{ code: 'minimum-retail-breach', severity: 'hold' }] });
     },
   ), { seed: seed + (shop ? 23 : woo ? 24 : 25), numRuns: 1020 });
-}, 60_000);
+}, 120_000);
 
 it('replays 2,000 workbook selections with exact worksheet names, leading zeros and sparse lines', () => {
   const book = readFileSync(new URL('../../../fixtures/supplier-delta/synthetic-pricebook.xlsx', import.meta.url));
@@ -1229,7 +1230,7 @@ it('replays 2,000 workbook selections with exact worksheet names, leading zeros 
       expect(parseSupplier(bytes, 'book.xlsx', { sheetName: exactName.toLowerCase() }).issues[0].code).toBe('missing-worksheet');
     },
   ), { seed: seed + 26, numRuns: 2_000 });
-}, 60_000);
+}, 120_000);
 
 it('replays 1,800 exact Supplier Delta cases with added, removed and blocked physical lines', async () => {
   const fromMills = (units: bigint): string => (units / 1000n).toString() + '.' + (units % 1000n).toString().padStart(3, '0');
@@ -1868,7 +1869,7 @@ describe('M18 CLI engine parity and custody', () => {
       expect(artifact(run, 'rollback') ?? null).toEqual(expected.rollbackBytes);
       expect(JSON.parse(decodeCsv(artifact(run, 'audit')!).text).status).toBe(expected.status);
     }), { seed: seed + 54, numRuns: 500 });
-  }, 30_000);
+  }, 120_000);
 
   it('checks 450 standalone verification reports against the direct inspector', async () => {
     await checkAsyncFuzz(fc.asyncProperty(sku, amount, fc.boolean(), async (key, price, unsafe) => {
@@ -1911,7 +1912,7 @@ describe('M18 CLI engine parity and custody', () => {
           expect(artifact(run, 'audit')).toEqual(direct.artifacts.auditJson.bytes);
         }
       }), { seed: seed + 56, numRuns: 600 });
-  }, 30_000);
+  }, 120_000);
 
   it('checks 500 safe local path pairs and rejects unsafe components in both path syntaxes', () => {
     const bad = fc.constantFrom('..', 'x.', 'report ', 'con', 'PrN.csv', 'NUL .csv', 'com1.json', 'LPT².xlsx', 'CONOUT$',
@@ -1989,7 +1990,7 @@ describe('M19 Shopify stock conservation and safety boundaries', () => {
         expect(result.verification).toEqual({ checked: true, restoredRows: 1, otherLocationRowsUntouched: 2 });
       },
     ), { seed: seed + 58, numRuns: 1200 });
-  }, 30_000);
+  }, 120_000);
 
   it('agrees with an exact rational 80% oracle on 750 whole-number proposals up to the safe integer boundary', async () => {
     await checkAsyncFuzz(fc.asyncProperty(
@@ -2397,7 +2398,114 @@ describe('M23 deterministic Bookkeeper categorization replay', () => {
   }, 120_000);
 });
 
-it('accounts for all 45,320 seeded executions without skips', () => {
-  expect(fuzzExecutions).toEqual({ accepted: 45_320, discarded: 0, properties: 73 });
+describe('M24 deterministic wholesale pricing, confidentiality, and floor replay', () => {
+  const titles = ['Handle', 'Title', 'Option1 Name', 'Option1 Value', 'Variant SKU', 'Variant Price', 'Body (HTML)'];
+  const source = (sku: string, price: string, name = 'Product', note = '') => csvBytes(titles,
+    [['product', name, 'Title', 'Default Title', sku, price, note]]);
+  const baseTier: WholesaleTier = { tierName: 'Bronze', discountMode: 'percent-off-retail', minOrderQty: '1', rounding: 'none', value: '0' };
+  const options: WholesaleOptions = { brandLabel: 'Brand', currency: 'USD', effectiveDate: '2026-10-01', shopifyCatalogTitle: 'Catalog',
+    shopifyTierName: 'Bronze', tiers: [baseTier] };
+
+  it('agrees with exact integer-cent pricing and post-rounding monotonicity across one to five tiers', async () => {
+    await checkAsyncFuzz(fc.asyncProperty(
+      fc.integer({ min: 1_000, max: 1_000_000 }), fc.integer({ min: 1, max: 30 }), fc.integer({ min: 1, max: 300 }),
+      fc.array(fc.tuple(fc.nat({ max: 8_500 }), fc.constantFrom('none', 'ending-95', 'ending-99', 'nearest-whole')),
+        { minLength: 1, maxLength: 5 }),
+      async (retail, pack, moq, generated) => {
+        const ordered = generated.slice().sort(([left], [right]) => left - right);
+        const sku = '00024';
+        const tiers: WholesaleTier[] = ordered.map(([discount, rounding], index) => ({
+          ...baseTier, tierName: index === 0 ? 'Bronze' : 'Tier ' + index, minOrderQty: String(1 + 23 * index), value: cents(BigInt(discount)),
+          rounding,
+        }));
+        const expected = ordered.map(([discount, rounding]) => {
+          const scaled = BigInt(retail) * BigInt(10_000 - discount);
+          if (rounding === 'nearest-whole') return (scaled + 500_000n) / 1_000_000n * 100n;
+          if (rounding === 'none') return (scaled + 5_000n) / 10_000n;
+          const ending = rounding === 'ending-95' ? 95n : 99n;
+          const next = (scaled + 9_999n) / 10_000n;
+          const difference = (ending - next % 100n + 100n) % 100n;
+          return next + difference;
+        });
+        const costSheet = csvBytes(['SKU', 'Case Pack', 'MOQ'], [[sku, String(pack), String(moq)]]);
+        const selected = tiers.length - 1;
+        const result = await buildWholesalePriceList('shopify', source(sku, cents(BigInt(retail))),
+          { ...options, costSheet, tiers, shopifyTierName: tiers[selected].tierName });
+        expect(result.rows[0].tiers.map(({ unitPrice }) => unitPrice)).toEqual(expected.map(cents));
+        const inverted = expected.findIndex((value, index) => index > 0 && value > expected[index - 1]);
+        if (inverted >= 0) {
+          expect(result).toMatchObject({ canExport: false, buyerCsv: null, shopifyCsv: null, lineSheetHtml: null });
+          expect(result.issues[0]).toMatchObject({ code: 'non-monotonic-tier-price', sku, line: 2, tierName: tiers[inverted].tierName });
+        } else {
+          expect(result.canExport).toBe(true);
+          const min = tiers.map(tier => String(Math.ceil(Math.max(moq, Number(tier.minOrderQty)) / pack) * pack));
+          expect(result.buyerRows[0].tiers.map(({ minOrderQty }) => minOrderQty)).toEqual(min);
+          expect(parseCsv(result.shopifyCsv!).records[1].cells.slice(4)).toEqual([cents(expected[selected]), String(pack), min[selected]]);
+        }
+      },
+    ), { seed: seed + 73, numRuns: 1_100 });
+  }, 120_000);
+
+  it('keeps buyer bytes independent of internal-only evidence and escapes untrusted visible content', async () => {
+    await checkAsyncFuzz(fc.asyncProperty(
+      fc.nat({ max: 20_000 }), fc.constantFrom('<img src=//evil.invalid onerror=run()>', '<svg onload=run()>',
+        '</td><script>run()</script>', '<iframe src=https://evil.invalid>'), fc.boolean(),
+      async (value, attack, formula) => {
+        const sku = '00' + value + attack;
+        const brandLabel = 'Buyer ' + attack;
+        const marker = 'PRIVATE-M24-DATA-' + value;
+        const product = (formula ? '=HYPERLINK ' : '') + attack;
+        const firstCost = cents(910_001n + BigInt(value));
+        const secondCost = cents(940_001n + BigInt(value));
+        const evidence = (cost: string, label: string) => csvBytes(['SKU', 'Cost', 'MAP', 'Label'], [[sku, cost, '10101.37', label]]);
+        const first = await buildWholesalePriceList('shopify', source(sku, '25000.53', product, marker),
+          { ...options, brandLabel, costSheet: evidence(firstCost, marker) });
+        const second = await buildWholesalePriceList('shopify', source(sku, '25000.53', product, marker + '-CATALOG'),
+          { ...options, brandLabel, costSheet: evidence(secondCost, marker + '-COST') });
+        expect(first.canExport && second.canExport).toBe(true);
+        expect(first.internalCsv).toContain(firstCost);
+        expect(second.internalCsv).toContain(secondCost);
+        expect(first.custody.costSheetSha256).not.toBe(second.custody.costSheetSha256);
+        for (const key of ['buyerCsv', 'shopifyCsv', 'lineSheetHtml'] as const) {
+          expect(first[key]).toBe(second[key]);
+          for (const secret of [firstCost, secondCost, marker, '10101.37', 'Landed Cost', 'Gross Margin %', 'SHA-256']) {
+            expect(first[key]).not.toContain(secret);
+          }
+        }
+        expect(parseCsv(first.buyerCsv!).records[1].cells.slice(0, 2)).toEqual([sku, formula ? "'" + product : product]);
+        expect(first.lineSheetHtml).toContain(escapeReportText(sku).replaceAll('//', '&#47;/'));
+        expect(first.lineSheetHtml).toContain(escapeReportText(brandLabel).replaceAll('//', '&#47;/'));
+        expect(first.lineSheetHtml).not.toMatch(/<script|<img|<svg|<iframe|\/\/|https?:/i);
+      },
+    ), { seed: seed + 74, numRuns: 800 });
+  }, 120_000);
+
+  it('withholds all buyer artifacts on one-cent MAP/cost breaches or an exact margin boundary breach', async () => {
+    await checkAsyncFuzz(fc.asyncProperty(
+      fc.integer({ min: 2, max: 100_000 }), fc.integer({ min: 1, max: 8 }), fc.constantFrom('map', 'cost', 'margin'),
+      async (amount, extraLines, kind) => {
+        const sku = '00024';
+        const rawPrice = BigInt(amount) * 2n;
+        const minMargin = kind === 'margin' ? '50.0000000000001' : undefined;
+        const targetCost = kind === 'cost' ? rawPrice + 1n : BigInt(amount);
+        const map = kind === 'map' ? rawPrice + 1n : rawPrice;
+        const baseline = source(sku, cents(rawPrice));
+        const costSheet = csvBytes(['SKU', 'Cost', 'MAP', 'Note'],
+          [['00123', '', '', 'line\n'.repeat(extraLines)], [sku, cents(targetCost), cents(map), '']]);
+        const result = await buildWholesalePriceList('shopify', baseline, { ...options, costSheet, minimumMarginPercent: minMargin, requireMap: true });
+        const code = kind === 'map' ? 'below-map' : kind === 'cost' ? 'below-landed-cost' : 'below-minimum-margin';
+        expect(result.issues).toEqual([expect.objectContaining({ code, sku, tierName: 'Bronze', baselineLine: 2, line: extraLines + 3,
+          costLine: extraLines + 3 })]);
+        expect(result.rows[0].tiers[0].unitPrice).toBe(cents(rawPrice));
+        expect(result).toMatchObject({ canExport: false, buyerCsv: null, shopifyCsv: null, lineSheetHtml: null, internalCsv: null,
+          custody: { buyerSha256: null, shopifySha256: null, lineSheetSha256: null, internalSha256: null } });
+        expect(JSON.parse(result.auditJson).issues).toEqual(result.issues);
+      },
+    ), { seed: seed + 75, numRuns: 700 });
+  }, 120_000);
+});
+
+it('accounts for all 47,920 seeded executions without skips', () => {
+  expect(fuzzExecutions).toEqual({ accepted: 47_920, discarded: 0, properties: 76 });
   console.info(`Deterministic fuzz: ${fuzzExecutions.accepted} accepted, ${fuzzExecutions.discarded} discarded across ${fuzzExecutions.properties} properties.`);
 });

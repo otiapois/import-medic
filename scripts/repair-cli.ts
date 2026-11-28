@@ -12,6 +12,7 @@ import { purchaseOrderPolicies } from '../src/core/purchase-order/engine';
 import { hasDuplicateKeys, profileText } from '../src/core/shopify-price-diff/settings-validation';
 import { conflictPolicies } from '../src/core/shopify-price-diff/types';
 import { parseWorkspaceProfile } from '../src/core/shopify-price-diff/workspace-profile';
+import { wholesaleSettings } from '../src/core/wholesale-pricelist/engine';
 
 const usage = `Usage: npm run repair-cli -- --platform <${PLATFORM_IDS.join('|')}> <input.csv>
   --output <repaired.csv>              Write CSV to a new file (default: stdout)
@@ -112,6 +113,7 @@ const modeFlags = {
   'purchase-order': ['baseline', ...orderSupplierFlags, 'reorder-point', 'target-stock', 'supplier-policy',
     'target-location', 'target-location-b64', 'po-reference', 'po-reference-b64', 'workspace-profile'],
   categorize: ['rules', 'currency', 'credit-debit-convention', 'workspace-profile'],
+  'wholesale-sheet': ['platform', 'baseline', 'options', 'cost-sheet', 'cost-sheet-tab', 'cost-sheet-tab-b64', 'workspace-profile'],
   migrate: ['source-platform', 'target-platform'],
 };
 const booleanFlags = new Set(['help', 'exclude-paypal-memo', 'formula-guard', ...checks.map(check => `confirm-${check}`),
@@ -132,6 +134,7 @@ const modeUsage = {
   'cost-creep': '--period <csv|xlsx> --period-label <label> [--period-sheet <name>] [--period-sku-column <header>] [--period-cost-column <header>] … [--baseline <csv>]',
   'purchase-order': '--baseline <csv> --supplier <csv|xlsx> [--supplier-label <label>] [--sheet <name>] … [--reorder-point <integer>] [--target-stock <integer>] [--supplier-policy <policy>] [--target-location <name>] [--po-reference <reference>] [--workspace-profile <json>]',
   categorize: '<input.csv> --rules <json> [--currency <ISO>] [--credit-debit-convention <bank|intuit>] [--workspace-profile <json>]',
+  'wholesale-sheet': '--platform <store> --baseline <csv> --options <json> [--cost-sheet <csv|xlsx>] [--cost-sheet-tab <name>] [--workspace-profile <json>]',
   migrate: '--source-platform <store> --target-platform <store> <input.csv>',
 };
 
@@ -463,6 +466,24 @@ async function explicitMain(args: string[]) {
       const targetPlatform = store('target-platform');
       if (sourcePlatform === targetPlatform) throw new Error('Choose distinct migration platforms.');
       request = { mode, sourcePlatform, targetPlatform, source: read('source', positionals[0], csv) };
+      break;
+    }
+    case 'wholesale-sheet': {
+      const platform = store('platform');
+      const baseline = source('baseline');
+      const { bytes } = read('options', required('options'), /\.json$/i);
+      if (bytes.length > 65_536) throw new Error('Wholesale options exceed the 64 KiB limit.');
+      const payload = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+      const value: unknown = JSON.parse(payload);
+      if (hasDuplicateKeys(payload)) throw new Error('Wholesale options contain a duplicate JSON key.');
+      const settings = wholesaleSettings.parse(value);
+      const costPath = option('cost-sheet');
+      const costSheet = costPath === undefined ? undefined : read('cost-sheet', costPath, /\.(?:csv|xlsx)$/i).bytes;
+      const profilePath = option('workspace-profile');
+      const profile = profilePath === undefined ? undefined : parseWorkspaceProfile(read('workspace-profile', profilePath, /\.json$/i).bytes);
+      if (profile && !profile.ok) throw new Error(profile.diagnostics.map(({ message }) => message).join('\n'));
+      request = { mode, platform, baseline, options: { ...settings, costSheet, worksheetName: named('cost-sheet-tab') },
+        branding: profile?.value.branding };
       break;
     }
   }

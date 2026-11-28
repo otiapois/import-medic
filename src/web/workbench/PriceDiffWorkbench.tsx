@@ -22,7 +22,7 @@ import { PRICE_UPDATE_PLATFORMS, withWorkspaceDefaults, WorkspaceProfileControls
 
 const PriceDiffReview = lazy(() => import('./PriceDiffReview').then(({ PriceDiffReview }) => ({ default: PriceDiffReview })));
 const VerifyImportPanel = lazy(() => import('./VerifyImportPanel'));
-const PromoCampaignPanel = lazy(() => import('./promo/PromoCampaignPanel'));
+const SaleCampaignWorkflow = lazy(() => import('./promo/SaleCampaignWorkflow'));
 const SupplierDeltaPanel = lazy(() => import('./supplier-delta/SupplierDeltaPanel'));
 const CatalogMigrationPanel = lazy(() => import('./catalog-migrator/CatalogMigrationPanel'));
 const InventoryWorkflow = lazy(() => import('./inventory-sync/InventoryWorkflow'));
@@ -701,7 +701,7 @@ export function PriceDiffWorkbench({ characterKeys }: { characterKeys: boolean }
         className="workbench-input price-studio-pane" hidden={mode !== 'campaign'}>
         {campaignVisited ? (
           <Suspense fallback={<p className="price-section" role="status">Opening Sale Campaign Pack…</p>}>
-            <PromoCampaignPanel initialPlatform={platform} onPairAvailable={setCampaignPair} onVerify={openCampaignVerification} />
+            <SaleCampaignWorkflow active={mode === 'campaign'} initialPlatform={platform} onPairAvailable={setCampaignPair} onVerify={openCampaignVerification} />
           </Suspense>
         ) : null}
       </div>
