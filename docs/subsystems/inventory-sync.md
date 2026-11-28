@@ -1,6 +1,6 @@
 # Shopify Inventory Sync
 
-**Inventory Sync** compares a Shopify inventory snapshot with supplier stock for one Shopify location. The browser opens it in Price Update Studio at `/shopify-price-update-diff`. The local CLI uses `--mode inventory-sync` and the same [comparison engine](../../src/core/inventory-sync/engine.ts). [CLI options and outputs](cli-automation.md#inventory-sync)
+**Inventory Sync > Inventory Update** compares a Shopify inventory snapshot with supplier stock for one Shopify location. The browser opens it in Price Update Studio at `/shopify-price-update-diff`. The local CLI uses `--mode inventory-sync` and the same comparison engine. The **Reorder PO Pack** workflow in the same tab prepares supplier purchase orders from inventory and cost catalogs. [Inventory comparison engine](../../src/core/inventory-sync/engine.ts) · [CLI options and outputs](cli-automation.md#inventory-sync) · [Reorder PO Pack contract](purchase-order.md)
 
 ## Source and scope
 

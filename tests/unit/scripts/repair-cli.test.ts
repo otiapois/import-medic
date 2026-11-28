@@ -25,6 +25,8 @@ const costCreepSpawnTimeout = 40_000;
 const costCreepTestTimeout = 100_000;
 const m21SpawnTimeout = 40_000;
 const m21TestTimeout = 100_000;
+const poSpawnTimeout = 40_000;
+const poTestTimeout = 100_000;
 let scratch: string;
 
 beforeAll(() => {
@@ -80,6 +82,61 @@ function verifyReceipt(mode: string, code: 0 | 2, status: string, directory: str
 
 const pricingHeaders = 'Handle,Title,Option1 Name,Option1 Value,Variant SKU,Variant Price,Variant Compare At Price,Cost per item\n';
 const catalog = (price: string) => pricingHeaders + `part,Spare Part,Title,Default Title,0001,${price},,5.00\nkit,Bundle,Title,Default Title,KIT,20.00,,10.00\n`;
+
+describe('M22 purchase order CLI subprocess', () => {
+  const baseline = fixture('purchase-order/store-inventory.csv');
+  const harbor = fixture('purchase-order/harbor-supply.csv');
+  const metro = fixture('purchase-order/metro-wholesale.csv');
+
+  it('publishes a branded split order and matches both custody manifests against actual bytes', () => {
+    const profile = content('agency-brand.json', JSON.stringify({ version: 1, storeName: 'Shop', platform: 'shopify', storeCurrency: 'USD',
+      branding: { agencyName: 'CLI <Warehouse>', preparedFor: 'Shop', contactNote: 'https://example.invalid/warehouse', accentKey: 'forest' } }));
+    const destination = resolve(scratch, 'po-ready');
+    const orders = ['po-harbor-supply.csv', 'po-metro-wholesale.csv', 'po-consolidated-summary.csv', 'purchase-order-pack.html'];
+    verifyReceipt('purchase-order', 0, 'ready', destination, ['--baseline', baseline, '--supplier', harbor, '--supplier-label', 'Harbor Supply',
+      '--supplier', metro, '--supplier-label-b64', b64('Metro Wholesale'), '--target-location-b64', b64('East'), '--po-reference', 'PO-017',
+      '--workspace-profile', profile], { baseline, 'supplier-1': harbor, 'supplier-2': metro, 'workspace-profile': profile },
+    ['po-audit.json', ...orders], root, poSpawnTimeout);
+    const audit = JSON.parse(readFileSync(resolve(destination, 'po-audit.json'), 'utf8'));
+    expect(audit).toMatchObject({ targetLocation: 'East', summary: { totalCents: 5000, totalSpend: '50.00', supplierCount: 2, unitsOrdered: 20 },
+      custody: { inventory: { sha256: digest(readFileSync(baseline)) }, suppliers: [harbor, metro].map(path => ({ sha256: digest(readFileSync(path)) })),
+        workspaceProfile: { sha256: digest(readFileSync(profile)) },
+        outputs: orders.map(filename => {
+          const bytes = readFileSync(resolve(destination, filename));
+          return { filename, byteLength: bytes.byteLength, sha256: digest(bytes) };
+        }),
+      },
+    });
+    const summaryCsv = parseCsv(readFileSync(resolve(destination, orders[2]), 'utf8'));
+    expect(summaryCsv.records.slice(1).map(({ cells }) => cells)).toEqual([
+      ['00123', '3', '3', '12', 'Harbor Supply', '2.00', '24.00'], ['00007', '2', '4', '8', 'Metro Wholesale', '3.25', '26.00'],
+    ]);
+    const html = readFileSync(resolve(destination, orders[3]), 'utf8');
+    expect(html).toContain('CLI &lt;Warehouse&gt;');
+    expect(html).toContain('PO-017');
+    expect(html).toContain(digest(readFileSync(profile)));
+    expect(html).not.toMatch(/<script|\b(?:href|src)=|https?:|\/\//i);
+  }, poTestTimeout);
+
+  it('publishes only source-backed diagnostics for an exact cost tie and invalid pack', () => {
+    const tie = content('tied-offers.csv', 'SKU,Unit Cost,MOQ,Case Pack\n00123,1.20,20,4\n00007,3.25,6,4');
+    const invalid = fixture('purchase-order/invalid-offers.csv');
+    for (const [name, supplier, policy, issue] of [
+      ['po-tie', tie, 'block-ties', { code: 'supplier-cost-tie', sku: '00123', line: 2,
+        offers: [{ supplierIndex: 0, line: 2 }, { supplierIndex: 1, line: 2 }] }],
+      ['po-invalid-pack', invalid, 'prefer-first', { code: 'invalid-case-pack', sku: '00123', line: 2, supplierIndex: 1, value: '0' }],
+    ] as const) {
+      const destination = resolve(scratch, name);
+      verifyReceipt('purchase-order', 2, 'blocked', destination, ['--baseline', baseline, '--supplier', harbor,
+        '--supplier', supplier, '--target-location', 'East', '--supplier-policy', policy],
+      { baseline, 'supplier-1': harbor, 'supplier-2': supplier }, ['po-audit.json'], root, poSpawnTimeout);
+      const audit = JSON.parse(readFileSync(resolve(destination, 'po-audit.json'), 'utf8'));
+      expect(audit.issues).toMatchObject([issue]);
+      expect(audit.custody.suppliers[1].sha256).toBe(digest(readFileSync(supplier)));
+      expect(audit.custody).not.toHaveProperty('outputs');
+    }
+  }, poTestTimeout);
+});
 
 describe('M21 native CLI subprocess', () => {
   it('writes Amazon text files and independently verifies the matched rollback', () => {

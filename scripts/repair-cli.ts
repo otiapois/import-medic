@@ -7,6 +7,7 @@ import { sha256, type RepairCustody } from '../src/core/audit/custody';
 import { cliModes, createCustodyManifest, dispatchCli, importPlatforms, storePlatforms, type CliArtifact, type CliInventorySupplier, type CliRequest, type DeltaSource, type PriceSupplier } from '../src/core/cli/dispatch';
 import { isSafeFileName, isSafeLocalPath } from '../src/core/cli/paths';
 import { PLATFORM_IDS, repairCsvWithBytes } from '../src/core/index';
+import { purchaseOrderPolicies } from '../src/core/purchase-order/engine';
 import { hasDuplicateKeys, profileText } from '../src/core/shopify-price-diff/settings-validation';
 import { conflictPolicies } from '../src/core/shopify-price-diff/types';
 import { parseWorkspaceProfile } from '../src/core/shopify-price-diff/workspace-profile';
@@ -85,6 +86,7 @@ async function legacyMain() {
 const repairFlags = ['date-order', 'qbo-layout', 'qbo-credit-debit', 'stripe-paypal-output', 'stripe-paypal-fee-convention', 'exclude-paypal-memo', 'formula-guard'];
 const supplierFlags = ['supplier', 'sheet', 'sheet-b64', 'recipe', 'label', 'label-b64'];
 const inventorySupplierFlags = ['supplier', 'sheet', 'sheet-b64', 'sku-column', 'sku-column-b64', 'quantity-column', 'quantity-column-b64'];
+const orderSupplierFlags = ['supplier', 'sheet', 'sheet-b64', 'supplier-label', 'supplier-label-b64'];
 const periodFlags = ['period', ...['period-label', 'period-sheet', 'period-sku-column', 'period-cost-column']
   .flatMap((name) => [name, name + '-b64'])];
 const checks = ['mapping', 'currency', 'fx'] as const;
@@ -106,12 +108,14 @@ const modeFlags = {
     'zero-out-threshold', 'max-cap', 'approve-large-drop'],
   'cost-creep': [...periodFlags, 'creep-threshold-percent', 'currency', 'baseline', 'baseline-currency',
     'baseline-sku-column', 'baseline-sku-column-b64', 'baseline-retail-column', 'baseline-retail-column-b64', 'workspace-profile'],
+  'purchase-order': ['baseline', ...orderSupplierFlags, 'reorder-point', 'target-stock', 'supplier-policy',
+    'target-location', 'target-location-b64', 'po-reference', 'po-reference-b64', 'workspace-profile'],
   migrate: ['source-platform', 'target-platform'],
 };
 const booleanFlags = new Set(['help', 'exclude-paypal-memo', 'formula-guard', ...checks.map(check => `confirm-${check}`),
   'confirm-conflict-policy', 'preserve-higher-compare-at', 'cost-check', 'approve-large-drop']);
 const sharedFlags = ['mode', 'help', 'out-dir'];
-const repeatable = new Set([...supplierFlags, ...inventorySupplierFlags, ...periodFlags,
+const repeatable = new Set([...supplierFlags, ...inventorySupplierFlags, ...periodFlags, ...orderSupplierFlags,
   ...checks.map(check => `confirm-${check}-supplier`), 'sku', 'sku-b64', 'skip-line']);
 const allOptions = Object.fromEntries([...new Set([...sharedFlags, ...Object.values(modeFlags).flat()])].map(name =>
   [name, { type: booleanFlags.has(name) ? 'boolean' as const : 'string' as const, ...(name === 'help' ? { short: 'h' } : {}) }]));
@@ -124,6 +128,7 @@ const modeUsage = {
   'supplier-delta': '--previous <csv|xlsx> --next <csv|xlsx> [--previous-sheet <name>] [--next-sheet <name>]',
   'inventory-sync': '--baseline <csv> --supplier <csv|xlsx> [--sheet <name>] --sku-column <header|1-based position> --quantity-column <header|1-based position> … [--target-location <name>]',
   'cost-creep': '--period <csv|xlsx> --period-label <label> [--period-sheet <name>] [--period-sku-column <header>] [--period-cost-column <header>] … [--baseline <csv>]',
+  'purchase-order': '--baseline <csv> --supplier <csv|xlsx> [--supplier-label <label>] [--sheet <name>] … [--reorder-point <integer>] [--target-stock <integer>] [--supplier-policy <policy>] [--target-location <name>] [--po-reference <reference>] [--workspace-profile <json>]',
   migrate: '--source-platform <store> --target-platform <store> <input.csv>',
 };
 
@@ -424,6 +429,22 @@ async function explicitMain(args: string[]) {
       request = { mode, periods, options: {
         creepThresholdPercent: option('creep-threshold-percent'), currency: option('currency'), branding: profile?.value.branding,
         retail: baseline ? { ...baseline, currency: baselineCurrency, mapping: { skuColumn: baselineSku, amountColumn: baselineRetail } } : undefined,
+      } };
+      break;
+    }
+    case 'purchase-order': {
+      const groups = groupedInputs('supplier', orderSupplierFlags);
+      const baseline = source('baseline');
+      const suppliers = groups.map((group, index) => {
+        const file = read(`supplier-${index + 1}`, group.supplier.value, /\.(?:csv|xlsx)$/i);
+        return { ...file, label: group['supplier-label']?.value ?? parse(file.filename).name, sheetName: group.sheet?.value };
+      });
+      const profilePath = option('workspace-profile');
+      request = { mode, baseline, suppliers, options: {
+        targetLocation: named('target-location'), reorderPoint: option('reorder-point'), targetStock: option('target-stock'),
+        policy: z.enum(purchaseOrderPolicies).optional().parse(option('supplier-policy')),
+        poReference: named('po-reference'),
+        workspaceProfile: profilePath === undefined ? undefined : read('workspace-profile', profilePath, /\.json$/i),
       } };
       break;
     }

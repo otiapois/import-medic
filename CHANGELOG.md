@@ -1,5 +1,11 @@
 # Changelog
 
+## v2.2.0 (M22)
+
+- Open **Inventory Sync > Reorder PO Pack** in Price Update Studio to plan replenishment for a selected location using one to three supplier CSV or XLSX catalogs. The reorder point is inclusive. Order quantities meet each supplier's minimum order quantity and case-pack multiple, and supplier comparison uses the exact extended subtotal after that rounding.
+- Download supplier-specific purchase order CSVs, a consolidated summary CSV, a SHA-256 audit, and a printable offline HTML pack with Workspace Profile branding. A held plan keeps the source diagnostics and withholds the order files.
+- Run the same planner locally with `repair-cli --mode purchase-order`. Use exit `2` to hold the batch and inspect the audit and custody manifest. The planner adds seeded fuzz coverage for case-pack and MOQ ceilings, exact cent totals, location isolation, and supplier ties and invalid costs.
+
 ## v2.1.0 (M21)
 
 - Choose **Amazon Seller Central** in Price Update Studio to compare a legacy Price & Quantity TSV or CSV with a proposed change file. Review price limits and original source lines before downloading the matched, same-delimiter files. In Verify Before Import, check each scoped change and replay the actual rollback against its matching update.

@@ -7,6 +7,7 @@ import { parseBom } from '../bom/rollup';
 import { buildCatalogMigration } from '../catalog-migrator/engine';
 import { buildCostCreep, costCreepFilenames, type CostCreepOptions, type CostCreepPeriod } from '../cost-creep/engine';
 import { buildPromoCampaign, type PromoCampaignOptions } from '../promo-campaign';
+import { buildPurchaseOrder, type PurchaseOrderOptions, type PurchaseOrderSupplier } from '../purchase-order/engine';
 import { createBookkeeperSignoffHtml } from '../repair/bookkeeper-signoff';
 import { parseBaseline, parseSupplier, suggestColumns, type ColumnSelection, type RowResolution, type SupplierDiffInput } from '../shopify-price-diff';
 import { applySupplierRecipe, parseSupplierRecipe } from '../shopify-price-diff/recipe';
@@ -19,7 +20,7 @@ import { parseWooCommerceBaseline } from '../woocommerce-price-diff';
 import { repairAudit } from '../worker/repair-views';
 import { runPriceComparison } from '../whatif/simulator';
 
-export const cliModes = ['repair', 'price-diff', 'verify', 'promo', 'supplier-delta', 'migrate', 'inventory-sync', 'cost-creep'] as const;
+export const cliModes = ['repair', 'price-diff', 'verify', 'promo', 'supplier-delta', 'migrate', 'inventory-sync', 'cost-creep', 'purchase-order'] as const;
 export const storePlatforms = ['shopify', 'woocommerce', 'bigcommerce'] as const satisfies readonly StorePlatform[];
 export const importPlatforms = [...storePlatforms, 'amazon'] as const satisfies readonly ImportPlatform[];
 export type CliMode = typeof cliModes[number];
@@ -61,6 +62,7 @@ export type CliRequest =
   | { mode: 'supplier-delta'; previous: DeltaSource; next: DeltaSource }
   | { mode: 'inventory-sync'; baseline: CliFile; suppliers: CliInventorySupplier[]; options: InventorySyncOptions }
   | { mode: 'cost-creep'; periods: readonly CostCreepPeriod[]; options?: CostCreepOptions }
+  | { mode: 'purchase-order'; baseline: CliFile; suppliers: readonly PurchaseOrderSupplier[]; options?: PurchaseOrderOptions }
   | { mode: 'migrate'; source: CliFile; sourcePlatform: StorePlatform; targetPlatform: StorePlatform };
 
 const utf8 = new TextEncoder();
@@ -242,6 +244,14 @@ export async function dispatchCli(request: CliRequest): Promise<CliResult> {
       return status === 'ready' && historyCsv !== null && briefHtml !== null
         ? result('ready', artifact('history-csv', costCreepFilenames.historyCsv, historyCsv), audit,
           artifact('vendor-brief-html', costCreepFilenames.briefHtml, briefHtml))
+        : result('blocked', audit);
+    }
+    case 'purchase-order': {
+      const { status, auditJson, supplierCsvs, summaryCsv, packHtml } = await buildPurchaseOrder(request.baseline, request.suppliers, request.options);
+      const audit = artifact('audit-json', auditJson.filename, auditJson.content);
+      return status === 'ready' && summaryCsv !== null && packHtml !== null
+        ? result(status, ...supplierCsvs.map(({ supplierIndex, filename, content }) => artifact(`supplier-${supplierIndex + 1}-po-csv`, filename, content)),
+          artifact('summary-csv', summaryCsv.filename, summaryCsv.content), audit, artifact('order-pack-html', packHtml.filename, packHtml.content))
         : result('blocked', audit);
     }
     case 'inventory-sync': {

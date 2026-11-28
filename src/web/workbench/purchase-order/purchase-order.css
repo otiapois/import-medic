@@ -1,0 +1,18 @@
+.po-settings .pricing-fields { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.purchase-order .inventory-review { margin-top: 18px; }
+.purchase-order .delta-state, .po-export-group .button { overflow-wrap: anywhere; }
+.purchase-order .po-metrics { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.po-breakdown td { font-variant-numeric: tabular-nums; }
+.po-diagnostics > ul { list-style: none; padding: 0; }
+.po-diagnostics h4, .po-export-group h4 { font-size: .9rem; font-weight: 670; }
+.po-export-group { display: grid; gap: 5px; }
+.po-export-group .button { max-width: 100%; white-space: normal; text-align: start; }
+
+@media (max-width: 720px) {
+  .po-breakdown tbody th:first-child { grid-column: 1 / -1; }
+}
+
+@media (max-width: 520px) {
+  .po-settings .pricing-fields, .purchase-order .po-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .po-settings .po-wide { grid-column: 1 / -1; }
+}

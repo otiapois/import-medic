@@ -14,6 +14,8 @@ ImportMedic compares a Shopify, WooCommerce, or legacy BigCommerce product expor
 
 **Inventory Sync** prepares an on-hand update for one Shopify location from an **All states** inventory export and supplier stock sheets. Review the reserve, low-stock threshold, and optional cap before downloading the update, matched rollback, and offline sign-off.
 
+**Reorder PO Pack** is a second workflow inside **Inventory Sync**. Plan replenishment for one location using inventory quantities and up to three supplier cost catalogs, then download separate purchase order CSVs and a printable offline pack.
+
 ## Run locally
 
 Use Node.js 24 and its bundled npm.
@@ -57,10 +59,16 @@ Schedule and import the files manually in the store's admin. Confirm the current
 
 ### Prepare a Shopify inventory update for one location
 
-1. Open **Inventory Sync** in Price Update Studio and choose **Load Synthetic Multi-Location Demo**, or export a fresh **All states** inventory CSV in Shopify under **Products > Inventory**. Add up to three supplier CSV or XLSX stock sheets. For each workbook choose the intended visible worksheet, then select the SKU and quantity columns. [Shopify inventory export and import](https://help.shopify.com/en/manual/inventory-and-locations/setup/inventory-csv)
+1. Open **Inventory Sync > Inventory Update** in Price Update Studio and choose **Load Synthetic Multi-Location Demo**, or export a fresh **All states** inventory CSV in Shopify under **Products > Inventory**. Add up to three supplier CSV or XLSX stock sheets. For each workbook choose the intended visible worksheet, then select the SKU and quantity columns. [Shopify inventory export and import](https://help.shopify.com/en/manual/inventory-and-locations/setup/inventory-csv)
 2. Choose **Target Location**. Set **Safety reserve units** and **Zero-out threshold**, and optionally set **Max cap (optional)**. A supplier quantity at or below the threshold becomes zero. Otherwise the reserve is subtracted, with zero as the floor, then the cap limits the result. Review each SKU's on-hand change, withheld units, and status. Resolve any holds before downloading the pair.
 3. Download **Inventory Update CSV**, **Inventory Rollback CSV**, **Inventory Audit JSON**, and **Inventory Sign-Off (.html)**. The native files cover changed variants at the selected location. The update expects the original on-hand quantity and sets the proposed quantity. The rollback expects that proposed quantity and restores the original quantity text. Keep the pair with the source export and compare the SHA-256 values before resaving the files. [Inventory Sync contract](docs/subsystems/inventory-sync.md)
 4. Use **Products > Inventory > Import** for an approved update. ImportMedic prepares and checks files against the uploaded snapshot. Shopify compares the expected quantity with current stock during import and rejects affected rows when they differ. Review Shopify's import result before using a matched rollback, and use a fresh export to reconcile any intervening stock movement. [Shopify import validation](https://help.shopify.com/en/manual/inventory-and-locations/setup/inventory-csv)
+
+### Plan replenishment and split purchase orders by supplier
+
+1. Open **Inventory Sync > Reorder PO Pack** in Price Update Studio. Choose **Load Synthetic Multi-Supplier PO Demo**, or add an inventory CSV and one to three supplier catalogs. Choose the exact visible worksheet for each XLSX catalog. Select **Target Location** when your inventory contains multiple locations.
+2. Set **Reorder Point**, **Target Stock**, and **Supplier Policy**, and enter a **PO Reference** if needed. Inventory row values take precedence over the defaults. A SKU qualifies when current stock is at or below its reorder point. The planner raises quantities to meet each supplier's minimum order quantity and case-pack multiple. **Lowest PO subtotal** compares extended subtotals after pack rounding and holds exact lowest-subtotal ties. Choose **Prefer first listed supplier** to use the first matching catalog in the displayed order.
+3. Review the supplier breakdown, quantities, and total spend. Download the individual PO CSVs, **Download Consolidated Summary CSV**, **Download PO Audit JSON**, and **Download Branded Offline PO Pack (.html)**. The files are for buyer review and supplier ordering. A hold keeps the audit with the affected source lines and withholds every order CSV and the HTML pack. [Reorder PO Pack contract](docs/subsystems/purchase-order.md)
 
 ### Review Shopify prices and download the matched files
 
@@ -154,7 +162,7 @@ Open **Workspace profile** and set the store name and currency. Select **Save Wo
 
 ### Brand an offline sign-off
 
-Open **Workspace profile** and expand **Agency Sign-Off Branding**. Enter **Agency name** and choose Forest, Navy, Slate, or Burgundy. Use **Prepared for** and **Contact email or note** if needed. Check the preview before downloading a Client, Campaign, Supplier Delta, Migration, or Inventory Sign-Off or a Vendor Negotiation Brief from the price workbench. The report includes the supplied branding as text and opens offline.
+Open **Workspace profile** and expand **Agency Sign-Off Branding**. Enter **Agency name** and choose Forest, Navy, Slate, or Burgundy. Use **Prepared for** and **Contact email or note** if needed. Check the preview before downloading a Client, Campaign, Supplier Delta, Migration, or Inventory Sign-Off, a Vendor Negotiation Brief, or a Reorder PO Pack from the price workbench. The report includes the supplied branding as text and opens offline.
 
 Save the Workspace Profile JSON to reuse the branding after navigating away. In the home workbench, complete a repair and open **Agency Sign-Off Branding** by the Bookkeeper export. Set the branding there or use **Load Workspace Profile (.json)** to bring in the same branding before downloading the Bookkeeper Sign-Off. [Branding and Workspace Profile contract](docs/subsystems/web-ui-seo.md#agency-sign-off-branding)
 
@@ -194,7 +202,7 @@ From the source checkout with its locked dependencies installed, use `npm run --
 npm run --silent repair-cli -- --mode repair --platform xero-bank fixtures/xero-bank/balance-verified.csv --out-dir ./batches/xero-demo
 ```
 
-Use a separate output directory for each run. All eight explicit modes write `custody-manifest.json` alongside their available results.
+Use a separate output directory for each run. All nine explicit modes write `custody-manifest.json` alongside their available results.
 
 | Mode | Use it to prepare |
 | --- | --- |
@@ -206,12 +214,15 @@ Use a separate output directory for each run. All eight explicit modes write `cu
 | `migrate` | A creation CSV, JSON audit, and offline migration sign-off |
 | `inventory-sync` | A Shopify inventory update and matched rollback for one location, JSON audit, and offline Inventory Sign-Off |
 | `cost-creep` | A multi-period supplier history CSV, JSON audit, and offline Vendor Negotiation Brief |
+| `purchase-order` | A supplier split PO pack with one CSV per chosen supplier, a consolidated summary, a JSON audit, and printable offline HTML |
 
 Exit `0` means the local run passed. Exit `2` means the run held the CSV or rejected the candidate and left diagnostic files. Exit `1` means an argument, input/output, or execution error. The unsigned manifest lists the SHA-256 of the original input bytes and each emitted result. Keep it with the originals and outputs to check for byte changes.
 
 Pass a saved Supplier Recipe JSON to `price-diff` with its supplier file. Review the current mapping, worksheet, and any currency or conflict settings before confirming them for this batch. For earlier single-file scripts, omitting `--mode` preserves `--platform`, the CSV stream on stdout or `--output`, and the optional `--audit` JSON. [CLI commands, options, and exit codes](docs/subsystems/cli-automation.md)
 
 For an Amazon Price & Quantity batch, run `price-diff` with `--platform amazon` and a single proposal file. Use the actual downloaded pair as inputs for `verify` with the original baseline. [Runnable Amazon TSV and CSV example](docs/subsystems/cli-automation.md#amazon-price-diff)
+
+For a reorder batch, use `--mode purchase-order` with one inventory CSV and one to three supplier catalogs. Set the location, worksheet, and supplier policy for the current files. [Runnable PO split and hold examples](docs/subsystems/cli-automation.md#purchase-order)
 
 ## Verify local processing
 

@@ -25,7 +25,7 @@ const VerifyImportPanel = lazy(() => import('./VerifyImportPanel'));
 const PromoCampaignPanel = lazy(() => import('./promo/PromoCampaignPanel'));
 const SupplierDeltaPanel = lazy(() => import('./supplier-delta/SupplierDeltaPanel'));
 const CatalogMigrationPanel = lazy(() => import('./catalog-migrator/CatalogMigrationPanel'));
-const InventorySyncPanel = lazy(() => import('./inventory-sync/InventorySyncPanel'));
+const InventoryWorkflow = lazy(() => import('./inventory-sync/InventoryWorkflow'));
 const AmazonPricePanel = lazy(() => import('./amazon/AmazonPricePanel'));
 
 const STUDIO_MODES = [
@@ -725,7 +725,7 @@ export function PriceDiffWorkbench({ characterKeys }: { characterKeys: boolean }
         className="workbench-input price-studio-pane" hidden={mode !== 'inventory-sync'}>
         {inventoryVisited ? (
           <Suspense fallback={<p className="price-section" role="status">Opening Inventory Sync…</p>}>
-            <InventorySyncPanel characterKeys={characterKeys} />
+            <InventoryWorkflow active={mode === 'inventory-sync'} characterKeys={characterKeys} />
           </Suspense>
         ) : null}
       </div>

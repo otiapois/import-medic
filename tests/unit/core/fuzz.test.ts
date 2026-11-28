@@ -20,6 +20,7 @@ import { decodeCsv, parseCsv, serializeCsv, serializeCsvRecords } from '../../..
 import { guardSpreadsheetCell } from '../../../src/core/formula-guard';
 import { buildInventorySync } from '../../../src/core/inventory-sync/engine';
 import { buildPromoCampaign, type PromoCampaignOptions } from '../../../src/core/promo-campaign/engine';
+import { buildPurchaseOrder } from '../../../src/core/purchase-order/engine';
 import { createBookkeeperSignoffHtml } from '../../../src/core/repair/bookkeeper-signoff';
 import { escapeReportText, offlineReportCsp } from '../../../src/core/report-html';
 import { buildMultiSupplierDiff, buildPriceDiff, parseBaseline, parseSupplier } from '../../../src/core/shopify-price-diff';
@@ -914,7 +915,7 @@ describe('M9 deterministic fee, currency split and custody replay', () => {
       },
     ), { seed: seed + 19, numRuns: 1200 });
     recordFuzz(details, 1200);
-  }, 45_000);
+  }, 120_000);
 });
 
 it('verifies 420 generated native pairs and rejects independently mutated import bytes', async () => {
@@ -2219,7 +2220,103 @@ describe('M21 Amazon corridor and accounting audit', () => {
   });
 });
 
-it('accounts for all 40,220 seeded executions without skips', () => {
-  expect(fuzzExecutions).toEqual({ accepted: 40_220, discarded: 0, properties: 67 });
+describe('M22 deterministic purchase order property replay', () => {
+  const terms = fc.record({
+    current: fc.integer({ min: -100_000, max: 100_000 }), target: fc.nat({ max: 100_000 }),
+    moq: fc.nat({ max: 100_000 }), pack: fc.integer({ min: 1, max: 1024 }), unit: fc.nat({ max: 100_000 }),
+  });
+
+  it('rounds each split order to the least valid MOQ and case-pack multiple and conserves cents', async () => {
+    await checkAsyncFuzz(fc.asyncProperty(terms, terms, async (left, right) => {
+      const rows = [left, right];
+      const skus = ['00123', '00007'];
+      const inventory = { filename: 'inventory.csv', bytes: csvBytes(['SKU', 'Available', 'Reorder Point', 'Target Stock'],
+        rows.map(({ current, target }, index) => [skus[index], String(current), String(Math.max(0, current)), String(target)])) };
+      const suppliers = rows.map(({ moq, pack, unit }, index) => ({ filename: `vendor-${index}.csv`, label: `Vendor ${index}`,
+        bytes: csvBytes(['SKU', 'Unit Cost', 'MOQ', 'Case Pack'], [[skus[index], cents(BigInt(unit)), String(moq), String(pack)]]) }));
+      const result = await buildPurchaseOrder(inventory, suppliers);
+      expect(result.issues).toEqual([]);
+      expect(result.status).toBe('ready');
+      expect(result.summary.belowReorder).toBe(2);
+      const expected = rows.map(({ current, target, moq, pack, unit }) => {
+        const rawNeed = Math.max(0, target - current);
+        const units = Math.ceil(Math.max(rawNeed, moq) / pack) * pack;
+        return { rawNeed, moq, pack, units, subtotal: unit * units };
+      });
+      expect(result.summary.unitsOrdered).toBe(expected[0].units + expected[1].units);
+      const grandTotal = expected[0].subtotal + expected[1].subtotal;
+      expect(result.summary.totalCents).toBe(grandTotal);
+      expect(result.summary.totalSpend).toBe(cents(BigInt(grandTotal)));
+      expect(result.groups.reduce((sum, { totalCents }) => sum + BigInt(totalCents), 0n)).toBe(BigInt(grandTotal));
+      expect(result.supplierCsvs.length).toBe(expected.filter(({ units }) => units > 0).length);
+      for (const { supplierIndex, lines, totalCents } of result.groups) {
+        const [{ orderQty, unitCostCents, lineTotalCents }] = lines;
+        const { units, rawNeed, moq, pack, subtotal } = expected[supplierIndex];
+        expect(orderQty).toBe(units);
+        expect(orderQty).toBeGreaterThanOrEqual(Math.max(rawNeed, moq));
+        expect(orderQty - pack).toBeLessThan(Math.max(rawNeed, moq));
+        expect(orderQty % pack).toBe(0);
+        expect(totalCents).toBe(subtotal);
+        expect(BigInt(lineTotalCents)).toBe(BigInt(orderQty) * BigInt(unitCostCents));
+      }
+    }), { seed: seed + 67, numRuns: 1_100 });
+  }, 120_000);
+
+  it('holds the exact winning tie and every invalid matching financial term', async () => {
+    await checkAsyncFuzz(fc.asyncProperty(
+      fc.integer({ min: 1, max: 128 }), fc.nat({ max: 100_000 }),
+      fc.constantFrom('tie', 'blank', 'negative', 'sub-cent', 'not-a-number', 'bad-pack', 'bad-moq', 'explicit-zero'),
+      fc.constantFrom('lowest-landed-cost', 'prefer-first', 'block-ties'),
+      async (pack, unit, mode, policy) => {
+        const inventory = { filename: 'inventory.csv', bytes: bytes('SKU,Available,Reorder Point,Target Stock\r\n00123,0,0,1') };
+        const a = { label: 'First', filename: 'first.csv', bytes: csvBytes(['SKU', 'Unit Cost', 'Case Pack'], [['00123', cents(BigInt(unit) * 2n), String(pack)]]) };
+        const cost = mode === 'blank' ? '' : mode === 'negative' ? '-0.01' : mode === 'sub-cent' ? '0.005' : mode === 'not-a-number' ? 'NaN' :
+          mode === 'explicit-zero' ? '0.00' : cents(BigInt(unit));
+        const b = { label: 'Second', filename: 'second.csv', bytes: csvBytes(['SKU', 'Unit Cost', 'Case Pack', 'MOQ'],
+          [['unmatched', 'garbage', '0', 'NaN'], ['00123', cost, mode === 'bad-pack' ? '0' : String(pack * 2), mode === 'bad-moq' ? '1.1' : '0']]) };
+        const result = await buildPurchaseOrder(inventory, [a, b], { policy });
+        const tie = mode === 'tie' || (mode === 'explicit-zero' && unit === 0);
+        if ((tie && policy === 'prefer-first') || (mode === 'explicit-zero' && !tie)) {
+          expect(result.status).toBe('ready');
+          const first = policy === 'prefer-first';
+          expect(result.groups[0]).toMatchObject({ label: first ? 'First' : 'Second', totalCents: first ? 2 * unit * pack : 0 });
+          return;
+        }
+        expect(result).toMatchObject({ status: 'blocked', groups: [], supplierCsvs: [], summaryCsv: null, packHtml: null });
+        expect(JSON.parse(result.auditJson.content).custody).not.toHaveProperty('outputs');
+        if (tie) expect(result.issues).toMatchObject([{ code: 'supplier-cost-tie', line: 2,
+          offers: [{ supplierIndex: 0, line: 2 }, { supplierIndex: 1, line: 3 }] }]);
+        else expect(result.issues).toMatchObject([{ code: mode === 'bad-pack' ? 'invalid-case-pack' : mode === 'bad-moq' ? 'invalid-moq' : 'invalid-unit-cost',
+          line: 3, sku: '00123', supplierIndex: 1 }]);
+      },
+    ), { seed: seed + 68, numRuns: 750 });
+  }, 120_000);
+
+  it('keeps exact source lines and isolates case-sensitive location quantities and eligibility', async () => {
+    await checkAsyncFuzz(fc.asyncProperty(
+      fc.integer({ min: -7500, max: 0 }), fc.integer({ min: 1, max: 7500 }), fc.boolean(), fc.integer({ min: 0, max: 8 }),
+      fc.constantFrom('East', 'Distribution', 'Depot'), async (targetCurrent, otherCurrent, upperFirst, newlines, label) => {
+        const other = label.toLowerCase();
+        const note = `${'line\r\n'.repeat(newlines)}memo`;
+        const active = ['00123', label, String(targetCurrent), String(otherCurrent), note];
+        const skipped = ['00123', other, String(otherCurrent), String(targetCurrent), note];
+        const inventory = { filename: 'inventory.csv', bytes: csvBytes(['SKU', 'Location', 'Available', 'On hand (current)', 'Note'],
+          upperFirst ? [active, skipped] : [skipped, active]) };
+        const supplier = { filename: 'catalog.csv', label: 'Vendor', bytes: bytes('SKU,Unit Cost\r\n00123,0.01\r\n123,invalid') };
+        const settings = { reorderPoint: '0', targetStock: '12' };
+        const missing = await buildPurchaseOrder(inventory, [supplier], settings);
+        expect(missing).toMatchObject({ status: 'blocked', targetLocation: null, issues: [{ code: 'target-location-required' }] });
+        const result = await buildPurchaseOrder(inventory, [supplier], { ...settings, targetLocation: label });
+        expect(result).toMatchObject({ status: 'ready', quantityBasis: 'Available', summary: { belowReorder: 1, totalCents: 12 - targetCurrent },
+          groups: [{ lines: [{ sku: '00123', inventoryLine: upperFirst ? 2 : 3 + newlines, currentQty: targetCurrent, orderQty: 12 - targetCurrent }] }] });
+        const inverse = await buildPurchaseOrder(inventory, [supplier], { ...settings, targetLocation: other });
+        expect(inverse).toMatchObject({ status: 'ready', groups: [], summary: { belowReorder: 0, totalCents: 0 } });
+      },
+    ), { seed: seed + 69, numRuns: 650 });
+  }, 120_000);
+});
+
+it('accounts for all 42,720 seeded executions without skips', () => {
+  expect(fuzzExecutions).toEqual({ accepted: 42_720, discarded: 0, properties: 70 });
   console.info(`Deterministic fuzz: ${fuzzExecutions.accepted} accepted, ${fuzzExecutions.discarded} discarded across ${fuzzExecutions.properties} properties.`);
 });

@@ -1,0 +1,6 @@
+SKU,Location,Available,On hand (current),Reorder Point,Target Stock
+00123,East,3,7,3,14
+00007,East,2,10,4,9
+00999,East,15,17,4,10
+00123,West,-20,7,3,14
+00055,West,0,5,4,10

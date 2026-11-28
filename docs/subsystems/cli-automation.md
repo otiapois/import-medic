@@ -182,6 +182,31 @@ Repeat `--period <csv|xlsx>` two to six times in oldest-to-newest order. After e
 
 Exit `0` writes `supplier-cost-creep.csv`, `supplier-cost-creep-audit.json`, `vendor-negotiation-brief.html`, and `custody-manifest.json`. Exit `2` writes the audit and manifest with source diagnostics. The receipt uses `period-1` through `period-6` for the supplied period slots and records the optional baseline and Workspace Profile when supplied. The history CSV is a supplier review report. [Cost-creep inputs, calculation, and reports](cost-creep.md)
 
+## purchase-order
+
+Give `--baseline <inventory.csv>` and one to three `--supplier <csv|xlsx>` flags in catalog order. Put the optional label and worksheet flags immediately after the supplier they describe.
+
+| Flag | Value or use |
+| --- | --- |
+| `--supplier-label` or `--supplier-label-b64` | Catalog label. Labels must be unique and default to the filename stem. |
+| `--sheet` or `--sheet-b64` | Exact visible worksheet for this XLSX supplier. |
+| `--target-location` or `--target-location-b64` | Exact location name. Required when the snapshot lists multiple locations. |
+| `--reorder-point`, `--target-stock` | Nonnegative whole-unit defaults where the corresponding inventory row values are blank. |
+| `--supplier-policy` | `lowest-landed-cost` (default), `block-ties`, or `prefer-first`. The first two compare exact extended subtotals after quantity rounding and hold lowest-subtotal ties. The last uses catalog order. |
+| `--po-reference` or `--po-reference-b64` | Reference for the order pack. |
+| `--workspace-profile <profile.json>` | Apply Agency Sign-Off Branding from a saved Workspace Profile. |
+
+Run these synthetic examples in distinct, fresh output directories.
+
+```sh
+npm run --silent repair-cli -- --mode purchase-order --baseline fixtures/purchase-order/store-inventory.csv --supplier fixtures/purchase-order/harbor-supply.csv --supplier-label "Harbor Supply" --supplier fixtures/purchase-order/metro-wholesale.csv --supplier-label "Metro Wholesale" --target-location East --po-reference DEMO-22 --out-dir ./batches/po-demo
+npm run --silent repair-cli -- --mode purchase-order --baseline fixtures/purchase-order/store-inventory.csv --supplier fixtures/purchase-order/harbor-supply.csv --supplier-label "Harbor Supply" --supplier fixtures/purchase-order/invalid-offers.csv --supplier-label "Metro Wholesale" --target-location East --out-dir ./batches/po-hold
+```
+
+The first command exits `0`. East has 3 units of SKU `00123` available, exactly at its reorder point. Harbor Supply wins at 12 units × 2.00 = 24.00 USD. Metro Wholesale's 1.50 unit cost requires an order of 20 units for 30.00 USD. SKU `00007` goes to Metro Wholesale at 8 units × 3.25 = 26.00 USD. Check both supplier CSVs, the consolidated rows, and the audit's 20 units and 5000 cents. Open `purchase-order-pack.html` locally and check `DEMO-22` and both supplier groups. Hash the actual output bytes and compare with the audit and manifest.
+
+The second command exits `2`. Check physical line 2 of `invalid-offers.csv` for the invalid case pack. The directory contains `po-audit.json` and `custody-manifest.json` only. [Reorder calculation and file custody](purchase-order.md)
+
 ## Legacy single-file repair
 
 Keep `--mode` absent for the original single-file interface.
