@@ -290,6 +290,29 @@ The first command exits `0` with three exact pairs totaling `207.55 USD` and `21
 
 Both exit codes retain `payout-reconciled-pairs.csv`, `payout-exceptions.csv`, `payout-reconciliation-audit.json`, `payout-reconciliation-sign-off.html`, and `custody-manifest.json`. The pairs CSV can contain only the header when no pair is provable. The two CSVs are review files. Compare the original input and emitted artifact hashes before resaving. [Payout inputs, matching rules, and output contract](payout-reconciliation.md)
 
+## landed-cost
+
+Supply `--invoice <csv|xlsx>`, `--out-dir <dir>`, and the following shipment settings. Enter each shared charge as a nonnegative integer number of target-currency cents, including `0` for any unused required charge.
+
+| Flag | Use |
+| --- | --- |
+| `--currency <CODE>` | Required target currency for allocations and charges. |
+| `--source-currency <CODE>` | FOB invoice currency. Defaults to the target currency. |
+| `--fx-rate <decimal>` | Required when source and target currencies differ. Give a positive rate in target currency per invoice-currency unit. |
+| `--invoice-sheet`, `--invoice-sheet-b64` | Select the exact visible worksheet when the invoice workbook has more than one. |
+| `--method <by-value\|by-weight\|by-cbm\|by-units>` | Required allocation method. |
+| `--duty-base <FOB\|CIF>` | Required basis for the duty estimate using the supplied rates. |
+| `--freight-cents`, `--insurance-cents`, `--handling-cents` | Required freight, insurance, and port or brokerage amounts. |
+| `--other-charges-cents` | Optional amount. Defaults to `0`. |
+| `--workspace-profile <json>` | Optional saved Agency Sign-Off Branding for the offline sheet. |
+
+```sh
+npm run --silent repair-cli -- --mode landed-cost --invoice fixtures/m27/container-invoice.csv --currency USD --method by-value --duty-base CIF --freight-cents 10103 --insurance-cents 211 --handling-cents 307 --other-charges-cents 19 --out-dir ./batches/landed-cost-demo
+npm run --silent repair-cli -- --mode landed-cost --invoice fixtures/m27/container-missing-weight.csv --currency USD --method by-weight --duty-base CIF --freight-cents 10103 --insurance-cents 211 --handling-cents 307 --other-charges-cents 19 --out-dir ./batches/landed-cost-hold
+```
+
+The first run exits `0` with a landed total of `203.16 USD` and zero cents of drift. Compare the `00901` row's `Landed Unit Cost` of `5.4418` and wholesale `Cost` of `5.45`. A ready run writes `shipment-landed-cost.csv`, `landed-cost-sheet.html`, `landed-cost-audit.json`, and `custody-manifest.json`. The second run exits `2` and reports the missing weight at physical line 3. Its output directory contains the audit and custody manifest only. [Shipment inputs, cent allocation, and pricing handoff](landed-cost.md)
+
 ## Legacy single-file repair
 
 Keep `--mode` absent for the original single-file interface.

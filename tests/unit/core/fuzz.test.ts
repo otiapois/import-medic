@@ -12,6 +12,7 @@ import { parseBigCommerceBaseline } from '../../../src/core/bigcommerce-price-di
 import { SIGNOFF_ACCENTS, brandSignoffHtml, type SignoffBrand } from '../../../src/core/branding/signoff-brand';
 import { brandCatalogMigrationReports, buildCatalogMigration, type CatalogPlatform } from '../../../src/core/catalog-migrator/engine';
 import { auditCatalogHygiene, validateGtin } from '../../../src/core/catalog-hygiene/engine';
+import { allocateLandedCost, allocationMethods } from '../../../src/core/landed-cost/allocator';
 import { readBigCommerce } from '../../../src/core/catalog-migrator/bigcommerce';
 import { readShopify } from '../../../src/core/catalog-migrator/shopify';
 import { readWooCommerceCatalog } from '../../../src/core/catalog-migrator/woocommerce';
@@ -2697,7 +2698,97 @@ describe('M26 deterministic payout reconciliation adversaries', () => {
   }, 120_000);
 });
 
-it('accounts for all 52,920 seeded executions without skips', () => {
-  expect(fuzzExecutions).toEqual({ accepted: 52_920, discarded: 0, properties: 81 });
+describe('M27 landed-cost adversarial allocation', () => {
+  const headers = ['SKU', 'Quantity', 'FOB Unit Cost', 'Unit Weight Kg', 'Unit Volume CBM', 'Duty Rate %', 'Description'];
+  const make = (rows: string[][]) => ({ name: 'shipment.csv', bytes: csvBytes(headers, rows) });
+  const line = fc.record({
+    quantity: fc.bigInt({ min: 1n, max: 50_000n }),
+    fob: fc.bigInt({ min: 1n, max: 10_000_000_000n }),
+    weight: fc.bigInt({ min: 1n, max: 400n }),
+    volume: fc.bigInt({ min: 1n, max: 100n }),
+    rate: fc.bigInt({ min: 0n, max: 20_000n }),
+  });
+  const prime = fc.constantFrom(2n, 3n, 7n, 11n, 101n, 100_003n, 2_305_843_009_213_693_951n);
+  const add = (values: bigint[]) => values.reduce((sum, value) => sum + value, 0n);
+  const sku = (index: number) => String(index).padStart(5, '0');
+
+  it.each(allocationMethods)('checks floor-or-ceiling quotas, remainder rank, physical ties and exact totals for %s', async method => {
+    await checkAsyncFuzz(fc.asyncProperty(
+      fc.array(line, { minLength: 2, maxLength: 8 }), fc.tuple(prime, prime, prime, prime), fc.boolean(),
+      async (items, pools, cif) => {
+        const [freightCents, insuranceCents, handlingCents, otherChargesCents] = pools;
+        const charges = { freightCents, insuranceCents, handlingCents, otherChargesCents };
+        const source = make(items.map(({ quantity, fob, weight, volume, rate }, index) => [
+          sku(items.length - index), String(quantity), cents(fob), cents(weight), '0.' + String(volume).padStart(3, '0'), cents(rate), '',
+        ]));
+        const result = await allocateLandedCost({ source, options: { ...charges, currency: 'USD', method, dutyBase: cif ? 'CIF' : 'FOB' } });
+        if (result.status !== 'ready') throw new Error(result.files.audit);
+        const { rows, totals, proof } = result;
+        const weight = items.map(item => item.quantity * (method === 'by-value' ? item.fob
+          : method === 'by-weight' ? item.weight : method === 'by-cbm' ? item.volume : 1n));
+        const totalWeight = add(weight);
+        for (const [bucket, pool] of Object.entries(charges) as [keyof typeof charges, bigint][]) {
+          expect(add(rows.map(row => row[bucket]))).toBe(pool);
+          expect(proof[bucket]).toEqual({ expected: pool, allocated: pool, drift: 0n });
+          const wins: { remainder: bigint; line: number }[] = [];
+          const losses: typeof wins = [];
+          rows.forEach((row, index) => {
+            const scaled = pool * weight[index];
+            const remainder = scaled % totalWeight;
+            const increment = row[bucket] - scaled / totalWeight;
+            expect(increment === 0n || increment === 1n && remainder > 0n).toBe(true);
+            (increment === 1n ? wins : losses).push({ remainder, line: row.line });
+          });
+          for (const win of wins) for (const loss of losses) {
+            expect(win.remainder > loss.remainder || win.remainder === loss.remainder && win.line < loss.line).toBe(true);
+          }
+        }
+        expect(totals.fobCents).toBe(add(items.map(item => item.quantity * item.fob)));
+        expect(totals.dutyCents).toBe(add(rows.map(row => row.dutyCents)));
+        const expected = totals.fobCents + add(pools) + totals.dutyCents;
+        expect(add(rows.map(row => row.landedExtendedCents))).toBe(expected);
+        expect(proof.landedExtendedCents).toEqual({ expected, allocated: expected, drift: 0n });
+      }), { seed: seed + 2700 + allocationMethods.indexOf(method), numRuns: 425 });
+  }, 120_000);
+
+  it('withholds artifacts for a missing, zero, negative or malformed required physical driver', async () => {
+    await checkAsyncFuzz(fc.asyncProperty(fc.array(line, { minLength: 2, maxLength: 8 }), fc.nat(), fc.boolean(),
+      fc.constantFrom('', '0', '0.0000', '-3.525', '5e-4', 'one'),
+      async (items, index, byWeight, invalid) => {
+        const bad = index % items.length;
+        const source = make(items.map(({ quantity, fob, weight, volume, rate }, row) => [
+          sku(row), String(quantity), cents(fob), bad === row && byWeight ? invalid : cents(weight),
+          bad === row && !byWeight ? invalid : cents(volume), cents(rate), '',
+        ]));
+        const result = await allocateLandedCost({ source, options: { currency: 'USD', dutyBase: 'FOB',
+          method: byWeight ? 'by-weight' : 'by-cbm', freightCents: 83n, insuranceCents: 127n, handlingCents: 167n } });
+        expect(result.status).toBe('blocked');
+        expect(Object.keys(result.files)).toEqual(['audit']);
+        expect(result.issues).toMatchObject([{ code: byWeight ? 'invalid-unit-weight' : 'invalid-unit-cbm', sku: sku(bad), line: bad + 2, value: invalid }]);
+      }), { seed: seed + 2704, numRuns: 400 });
+  }, 120_000);
+
+  it('preserves zero-padded SKUs and neutralizes formula and XSS payloads in emitted bytes', async () => {
+    await checkAsyncFuzz(fc.asyncProperty(line, fc.integer({ min: 0, max: 9_999 }),
+      fc.string({ unit: fc.constantFrom('"', "'", '&', '\r\n', ',', 'رحلة', '-', '0', 'x'), maxLength: 35 }),
+      async (item, id, text) => {
+        const exactSku = sku(id);
+        const dangerous = '=HYPERLINK("https://outside.invalid") <script>' + text + '</script>';
+        const source = make([[exactSku, String(item.quantity), cents(item.fob), cents(item.weight), cents(item.volume), cents(item.rate), dangerous]]);
+        const result = await allocateLandedCost({ source, options: { currency: 'USD', dutyBase: 'CIF', method: 'by-cbm',
+          freightCents: 101n, insuranceCents: 19n, handlingCents: 13n } });
+        if (result.status !== 'ready') throw new Error(result.files.audit);
+        const [{ cells: columns }, { cells: exported }] = parseCsv(result.files.csv).records;
+        expect(exported[columns.indexOf('SKU')]).toBe(exactSku);
+        expect(exported[columns.indexOf('Description')]).toBe("'" + dangerous);
+        expect(result.files.html).toContain('&lt;script&gt;');
+        expect(result.files.html).not.toMatch(/<script|https?:|\/\/|\b(?:src|href)=/i);
+        expect(result.files.html).toContain("script-src 'none'; connect-src 'none'");
+      }), { seed: seed + 2705, numRuns: 400 });
+  }, 120_000);
+});
+
+it('accounts for all 55,420 seeded executions without skips', () => {
+  expect(fuzzExecutions).toEqual({ accepted: 55_420, discarded: 0, properties: 87 });
   console.info(`Deterministic fuzz: ${fuzzExecutions.accepted} accepted, ${fuzzExecutions.discarded} discarded across ${fuzzExecutions.properties} properties.`);
 });

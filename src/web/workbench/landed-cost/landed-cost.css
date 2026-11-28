@@ -1,0 +1,57 @@
+.landed-cost-panel { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; }
+.landed-cost-panel .price-heading .button { max-width: 100%; white-space: normal; }
+.landed-cost-setup { display: grid; grid-template-columns: minmax(0, .72fr) minmax(0, 1.28fr); gap: 12px; align-items: start; }
+.landed-cost-setup .drop-zone { min-height: 82px; gap: 6px; padding-block: 9px; }
+.landed-cost-setup .price-file-selection:has(.price-sheet) { grid-template-columns: minmax(0, 1fr); }
+.landed-invoice-columns { margin-top: 9px; }
+.landed-cost-settings { min-width: 0; margin: 0; padding: 9px 12px 12px; border: 1px solid var(--line); border-radius: 10px; }
+.landed-cost-settings legend { padding-inline: 4px; font-size: .9rem; font-weight: 700; }
+.landed-cost-settings .price-fields { align-items: end; }
+.landed-currency-fields > div { display: grid; gap: 4px; min-width: 0; }
+.landed-cost-settings .price-fields input {
+  width: 100%; min-width: 0; min-height: 38px; padding: 6px 9px; border: 1px solid var(--control-line);
+  border-radius: 7px; background: var(--surface); color: var(--ink); font-variant-numeric: tabular-nums; font-weight: 500;
+}
+.landed-cost-settings .price-fields input::placeholder { color: var(--muted); opacity: 1; }
+.landed-cost-settings .price-fields input[aria-invalid='true'] { border-color: #873822; }
+.landed-settings-help { display: flex; flex-wrap: wrap; gap: 0 14px; }
+.landed-fees-help { margin-block: 9px 5px; }
+.landed-cost-fx { margin-top: 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: #f4f8f7; }
+.landed-cost-fx .price-fields { grid-template-columns: minmax(0, 155px); }
+.landed-cost-fx .checkbox-label { gap: 10px; font-size: .875rem; font-weight: 650; }
+.landed-cost-panel > .signoff-branding { margin: 0; }
+.landed-cost-review { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+.landed-cost-review > .field-help { margin-top: 0; }
+.landed-cost-review [data-held='true'] { color: var(--amber); }
+.landed-cost-review [data-ready='true'] { color: var(--teal-strong); }
+.landed-cost-kpis {
+  display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 1px; margin: 2px 0 0;
+  border: 1px solid var(--line); border-radius: 9px; overflow: hidden; background: var(--line);
+}
+.landed-cost-kpis > div { min-width: 0; padding: 8px 11px; background: var(--surface); overflow-wrap: anywhere; }
+.landed-cost-kpis dt { color: var(--muted); font-size: .8rem; font-weight: 650; }
+.landed-cost-kpis dd { margin: 2px 0 0; font-size: clamp(1.16rem, 2vw, 1.52rem); font-variant-numeric: tabular-nums; font-weight: 740; }
+.landed-cost-kpis small { font-size: .76rem; font-weight: 650; white-space: nowrap; }
+.landed-penny[data-balanced='true'] { color: var(--teal-strong); background: var(--teal-soft); }
+.landed-penny[data-balanced='false'] { color: var(--amber); background: var(--amber-soft); }
+.landed-penny dt { color: inherit; }
+.landed-cost-breakdown { min-width: 0; margin-top: 2px; }
+.landed-cost-breakdown > .preview-card { margin-top: 7px; }
+.landed-cost-table table { min-width: max(100%, 770px); }
+.landed-cost-table :is(th, td) { vertical-align: top; }
+.landed-cost-table td { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.landed-cost-table th { font-size: .79rem; }
+.landed-cost-table th:first-child { min-width: 66px; }
+.landed-cost-table code { max-width: 18ch; font-weight: 680; }
+.landed-cost-table small { display: block; margin-top: 1px; color: var(--muted); font-size: .75rem; font-weight: 500; }
+.landed-cost-issues { min-width: 0; overflow-wrap: anywhere; }
+.landed-cost-issues code { white-space: pre-wrap; }
+
+@media (max-width: 930px) {
+  .landed-cost-setup { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 620px) {
+  .landed-cost-settings .price-fields:not(.landed-cost-fx .price-fields),
+  .landed-cost-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .landed-cost-kpis .landed-penny { grid-column: 1 / -1; }
+}

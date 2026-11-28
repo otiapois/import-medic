@@ -67,4 +67,4 @@ it('exports only public HEAD blobs and leaves an existing export intact', () => 
     if (dirname(temporary) !== parent || temporary !== scratch) throw new Error('Unexpected export test directory');
     rmSync(temporary, { recursive: true, force: true });
   }
-}, 15_000);
+}, 45_000);

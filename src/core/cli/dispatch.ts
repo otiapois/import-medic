@@ -8,6 +8,7 @@ import { parseBom } from '../bom/rollup';
 import { auditCatalogHygiene, type CatalogHygieneOptions, type CatalogHygieneSource } from '../catalog-hygiene/engine';
 import { buildCatalogMigration } from '../catalog-migrator/engine';
 import { buildCostCreep, costCreepFilenames, type CostCreepOptions, type CostCreepPeriod } from '../cost-creep/engine';
+import { allocateLandedCost, landedCostFilenames, type LandedCostOptions, type LandedCostSource } from '../landed-cost/allocator';
 import { buildPromoCampaign, type PromoCampaignOptions } from '../promo-campaign';
 import { buildPurchaseOrder, type PurchaseOrderOptions, type PurchaseOrderSupplier } from '../purchase-order/engine';
 import { reconcilePayouts, type ReconciliationInput } from '../reconciliation/payout-matcher';
@@ -25,7 +26,7 @@ import { runPriceComparison } from '../whatif/simulator';
 import type { SignoffBrand } from '../branding/signoff-brand';
 import { buildWholesalePriceList, type WholesaleOptions } from '../wholesale-pricelist/engine';
 
-export const cliModes = ['repair', 'price-diff', 'verify', 'promo', 'supplier-delta', 'migrate', 'inventory-sync', 'cost-creep', 'purchase-order', 'categorize', 'wholesale-sheet', 'catalog-hygiene', 'reconcile-payouts'] as const;
+export const cliModes = ['repair', 'price-diff', 'verify', 'promo', 'supplier-delta', 'migrate', 'inventory-sync', 'cost-creep', 'purchase-order', 'categorize', 'wholesale-sheet', 'catalog-hygiene', 'reconcile-payouts', 'landed-cost'] as const;
 export const storePlatforms = ['shopify', 'woocommerce', 'bigcommerce'] as const satisfies readonly StorePlatform[];
 export const importPlatforms = [...storePlatforms, 'amazon'] as const satisfies readonly ImportPlatform[];
 export type CliMode = typeof cliModes[number];
@@ -71,6 +72,7 @@ export type CliRequest =
   | { mode: 'wholesale-sheet'; platform: StorePlatform; baseline: CliFile; options: WholesaleOptions; branding?: SignoffBrand }
   | { mode: 'catalog-hygiene'; sources: readonly CatalogHygieneSource[]; options?: CatalogHygieneOptions }
   | ({ mode: 'reconcile-payouts' } & ReconciliationInput)
+  | { mode: 'landed-cost'; source: LandedCostSource; options: LandedCostOptions }
   | ({ mode: 'categorize' } & CategorizationInput)
   | { mode: 'migrate'; source: CliFile; sourcePlatform: StorePlatform; targetPlatform: StorePlatform };
 
@@ -281,6 +283,13 @@ export async function dispatchCli(request: CliRequest): Promise<CliResult> {
       return result(status === 'READY' ? 'ready' : 'blocked', { role: 'reconciled-pairs-csv', ...pairsCsv },
         { role: 'exceptions-csv', ...exceptionsCsv }, { role: 'audit-json', ...auditJson },
         { role: 'sign-off-html', ...signoffHtml });
+    }
+    case 'landed-cost': {
+      const shipment = await allocateLandedCost(request);
+      const audit = artifact('audit-json', landedCostFilenames.audit, shipment.files.audit);
+      return shipment.status === 'blocked' ? result('blocked', audit) : result('ready',
+        artifact('landed-cost-csv', landedCostFilenames.csv, shipment.files.csv), audit,
+        artifact('landed-cost-html', landedCostFilenames.html, shipment.files.html));
     }
     case 'supplier-delta': return supplierDelta(request.previous, request.next);
     case 'cost-creep': {

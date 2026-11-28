@@ -25,6 +25,7 @@ export interface SourceCell {
   formula?: string;
   scientific?: boolean;
   currency?: string;
+  percentFormat?: true;
 }
 
 export interface SourceRow {

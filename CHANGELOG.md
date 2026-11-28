@@ -1,5 +1,11 @@
 # Changelog
 
+## v2.7.0 (M27)
+
+- Open **Inventory Sync > Landed Cost Calculator** in Price Update Studio to allocate freight, insurance, and other shipment charges from a local CSV or XLSX invoice. Choose value, weight, CBM, or units and enter the shipment's rates and duty estimate basis.
+- Review exact cent totals for each shared charge, per-SKU duty estimates, and the landed total. Download the landed-cost CSV, an audit with SHA-256 fingerprints, and a branded offline breakdown. Use the same CSV as a supplier cost input for Price Diff or with a catalog in Wholesale B2B Line-Sheet.
+- Run `repair-cli --mode landed-cost` for the same calculation locally. A held run returns exit `2` and retains the audit and custody manifest with source diagnostics. Added seeded coverage for all four allocation methods, cent conservation, invalid dimensions, and safe report output.
+
 ## v2.6.0 (M26)
 
 - Open **Payout vs Bank Reconciler** in the Accounting Workbench to compare one row per completed platform payout with bank deposits. Match in exact cents, in the same currency, on or after the payout date. Choose an inclusive window of 0 to 10 calendar days, with 5 days as the default.

@@ -2,6 +2,8 @@
 
 [`buildWholesalePriceList`](../../src/core/wholesale-pricelist/engine.ts) reads one Shopify, WooCommerce, or legacy BigCommerce product CSV. The optional cost and MAP CSV or XLSX joins on exact `SKU` and needs at least one of `Cost`, `MAP`, `Case Pack`, or `MOQ`. Keep leading-zero workbook SKUs as text and use the intended visible worksheet. Price and quantity settings, previews, and downloads stay local.
 
+To use a shipment calculation, attach `shipment-landed-cost.csv` as the optional cost and MAP sheet along with the catalog. The `Cost` column uses the ceiling of the exact per-unit landed cost in whole cents. It provides a conservative cost input in the batch currency. Add MAP values separately where needed. If the catalog supplies a different cost for the same SKU, review the discrepancy before proceeding. [Shipment calculation and CSV handoff](landed-cost.md)
+
 ## Tier calculation
 
 - Use one currency for catalog prices, landed costs, and MAP amounts. ImportMedic checks supplied currency evidence against the batch currency. The catalog and cost sheet may supply these per-SKU values. Disagreement between sources holds the batch.

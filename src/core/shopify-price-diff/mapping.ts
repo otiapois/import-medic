@@ -7,7 +7,7 @@ import { compareAtHeader, inventoryHeader } from './source';
 
 export const skuAliases = new Set(['sku', 'variant sku', 'supplier sku', 'product sku', 'item sku', 'sku code', 'stock keeping unit']);
 const handleAliases = new Set(['handle', 'url handle', 'product handle', 'shopify handle']);
-const costAliases = new Set(['cost', 'unit cost', 'wholesale cost', 'wholesale price']);
+const costAliases = new Set(['cost', 'unit cost', 'wholesale cost', 'wholesale price', 'landed unit cost']);
 export const priceAliases = new Set(['price', 'new price', 'variant price', 'new variant price', 'supplier price', 'unit price', 'retail price', 'selling price', 'sale price', ...costAliases]);
 const compareAtAliases = new Set(['compare at price', 'variant compare at price', 'new compare at price', 'msrp', 'rrp']);
 

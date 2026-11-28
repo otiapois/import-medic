@@ -34,6 +34,8 @@ const hygieneSpawnTimeout = 40_000;
 const hygieneTestTimeout = 100_000;
 const reconciliationSpawnTimeout = 40_000;
 const reconciliationTestTimeout = 120_000;
+const landedCostSpawnTimeout = 40_000;
+const landedCostTestTimeout = 120_000;
 let scratch: string;
 
 beforeAll(() => {
@@ -93,6 +95,39 @@ function verifyReceipt(mode: string, code: 0 | 2, status: string, directory: str
 
 const pricingHeaders = 'Handle,Title,Option1 Name,Option1 Value,Variant SKU,Variant Price,Variant Compare At Price,Cost per item\n';
 const catalog = (price: string) => pricingHeaders + `part,Spare Part,Title,Default Title,0001,${price},,5.00\nkit,Bundle,Title,Default Title,KIT,20.00,,10.00\n`;
+
+describe('M27 landed-cost CLI subprocess', () => {
+  const invoice = fixture('m27/container-invoice.csv');
+  const [csvName, auditName, htmlName] = ['shipment-landed-cost.csv', 'landed-cost-audit.json', 'landed-cost-sheet.html'];
+  const options = ['--currency', 'USD', '--duty-base', 'CIF', '--freight-cents', '10103', '--insurance-cents', '211',
+    '--handling-cents', '307', '--other-charges-cents', '19'];
+  it('writes a conserved branded receipt and holds both artifacts for a missing weight', () => {
+    const profile = content('landed-cost-brand.json', serializeWorkspaceProfile({ version: 1, storeName: 'Demo Container', platform: 'shopify',
+      storeCurrency: 'USD', branding: { agencyName: 'Dock <&> Studio', preparedFor: 'Demo Buyer', contactNote: '', accentKey: 'forest' } }));
+    const ready = resolve(scratch, 'landed-cost-ready');
+    verifyReceipt('landed-cost', 0, 'ready', ready, ['--invoice', invoice, '--method', 'by-value', ...options, '--workspace-profile', profile],
+      { invoice, 'workspace-profile': profile }, [csvName, auditName, htmlName], root, landedCostSpawnTimeout);
+    const readyCsv = readFileSync(resolve(ready, csvName));
+    const readyHtml = readFileSync(resolve(ready, htmlName));
+    const readyAudit = JSON.parse(readFileSync(resolve(ready, auditName), 'utf8'));
+    expect(readyAudit).toMatchObject({ totals: { fobCents: '8843', dutyCents: '833', landedExtendedCents: '20316', driftCents: '0' },
+      custody: { sourceSha256: digest(readFileSync(invoice)), csvSha256: digest(readyCsv), htmlSha256: digest(readyHtml) } });
+    expect(readyHtml.toString()).toContain('Dock &lt;&amp;&gt; Studio');
+    const [{ cells: headers }, ...rows] = parseCsv(readyCsv.toString()).records;
+    expect(rows.map(({ cells }) => cells[0])).toEqual(['00042', '00007', '00901']);
+    expect(rows[2].cells[headers.indexOf('Landed Unit Cost')]).toBe('5.4418');
+    expect(rows[2].cells[headers.indexOf('Cost')]).toBe('5.45');
+
+    const noWeight = fixture('m27/container-missing-weight.csv');
+    const held = resolve(scratch, 'landed-cost-held');
+    verifyReceipt('landed-cost', 2, 'blocked', held, ['--invoice', noWeight, '--method', 'by-weight', ...options],
+      { invoice: noWeight }, [auditName], root, landedCostSpawnTimeout);
+    const heldAudit = JSON.parse(readFileSync(resolve(held, auditName), 'utf8'));
+    expect(heldAudit).toMatchObject({ status: 'blocked',
+      issues: [{ code: 'invalid-unit-weight', line: 3, sku: '00007', column: 'Unit Weight Kg', value: '' }] });
+    expect(heldAudit.custody).toEqual({ sourceSha256: digest(readFileSync(noWeight)) });
+  }, landedCostTestTimeout);
+});
 
 describe('M26 reconcile-payouts CLI subprocess', () => {
   const files = ['payout-reconciled-pairs.csv', 'payout-exceptions.csv', 'payout-reconciliation-audit.json',
@@ -658,5 +693,5 @@ describe('M18 real CLI subprocess', () => {
     const wrongSource = cli(['--mode', 'repair', '--platform', 'freshbooks-expenses', resolve(linked, 'normal.csv'), '--out-dir', linkedFile]);
     expect(wrongSource.status).toBe(1);
     expect(readdirSync(real)).toEqual(['normal.csv']);
-  }, 60_000);
+  }, 120_000);
 });

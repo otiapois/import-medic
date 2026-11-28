@@ -113,7 +113,8 @@ function workbookCell(
   const currency = /\[\$([A-Z]{3}|[$€£¥₹])(?:-[^\]]+)?\]/.exec(format)?.[1] ??
     /"([A-Z]{3})"/.exec(format)?.[1] ?? /[$€£¥₹]/.exec(format.replace(/\[\$-[^\]]+\]/g, ''))?.[0];
   const formatTokens = format.replace(/\[[^\]]*]|"[^"]*"|\\./g, '');
-  if (/%|[ymdhs]/i.test(formatTokens) && !scientific) return { value: stored, kind: 'unsupported' };
+  if (/%|[ymdhs]/i.test(formatTokens) && !scientific) return { value: stored, kind: 'unsupported',
+    ...(/^[#0]+(?:\.[#0]+)?%$/.test(format) ? { percentFormat: true } : {}) };
   return { value: stored, kind: 'number', ...(scientific ? { scientific } : {}), ...(currency ? { currency } : {}) };
 }
 

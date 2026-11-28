@@ -37,6 +37,10 @@ The rule uses decimal strings for parameters and the optional `minimumRetail`. T
 
 Tiered pricing requires two to six brackets. Every finite `upTo` is a positive decimal string, thresholds strictly increase, and the last bracket uses `upTo: null` to cover higher costs. Multipliers are positive. Tier markup percentages and optional fixed fees are nonnegative. The engine compares exact post-FX cost to the limits before rounding. For limits of `20.00` and `100.00`, the first tier covers `20.00` and the second covers `20.01`. The selected tier applies its own adjustment, then the overall minimum retail and rounding settings apply. Invalid brackets hold the native pair. A label such as `Tier 1 (<= 20.00): 2.5x` appears in the diff, audits, and Client Sign-Off HTML.
 
+## Use costs from a shipment
+
+Attach `shipment-landed-cost.csv` as a supplier sheet. Confirm `SKU` and `Landed Unit Cost` in the current batch's mapping. The four-decimal value feeds the existing cost formula and margin review. The CSV currency is the shipment's resulting currency. Confirm it when it matches the store currency, or explicitly configure FX for the new batch if the store uses a different currency. [Shipment allocation and CSV contract](landed-cost.md)
+
 ## Bundle and kit cost rollup
 
 **Build Update** can attach a separate BOM CSV or an XLSX file with one visible worksheet for base store pricing. Use the headers `Bundle SKU`, `Component SKU`, and `Quantity`, with an optional `Assembly Cost`. Each row names an exact kit-to-component relationship. Preserve leading zeros in both SKU columns and store workbook SKUs as text. Repeat a component within one kit by increasing its positive whole-number quantity on a single row. Assembly is a plain nonnegative store-currency amount in exact cents and applies once per kit. Nonblank entries for the same kit must agree. A blank entry uses the amount declared on another row of the kit, or zero if all of its entries are blank.

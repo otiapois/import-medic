@@ -20,6 +20,8 @@ ImportMedic compares a Shopify, WooCommerce, or legacy BigCommerce product expor
 
 **Reorder PO Pack** is a second workflow inside **Inventory Sync**. Plan replenishment for one location using inventory quantities and up to three supplier cost catalogs, then download separate purchase order CSVs and a printable offline pack.
 
+**Landed Cost Calculator** allocates freight, insurance, port and brokerage fees, and other charges across one shipment. Review per-SKU duty estimates and exact shipment totals, then download a cost CSV for pricing review, an audit, and an offline breakdown.
+
 **Auto-Categorize Rules** applies saved account and tax rules to a local transaction CSV. Review coverage and signed inclusive-tax splits, then download the categorized rows, account summary, audit, and offline sign-off for review.
 
 **Payout vs Bank Reconciler** compares a prepared platform payout summary with the bank's posted deposits in the home Accounting Workbench. Review exact pairs and gaps by currency, then download the pairs, exception queue, audit, and branded offline sign-off.
@@ -91,6 +93,13 @@ Schedule and import the files manually in the store's admin. Confirm the current
 1. Open **Inventory Sync > Reorder PO Pack** in Price Update Studio. Choose **Load Synthetic Multi-Supplier PO Demo**, or add an inventory CSV and one to three supplier catalogs. Choose the exact visible worksheet for each XLSX catalog. Select **Target Location** when your inventory contains multiple locations.
 2. Set **Reorder Point**, **Target Stock**, and **Supplier Policy**, and enter a **PO Reference** if needed. Inventory row values take precedence over the defaults. A SKU qualifies when current stock is at or below its reorder point. The planner raises quantities to meet each supplier's minimum order quantity and case-pack multiple. **Lowest PO subtotal** compares extended subtotals after pack rounding and holds exact lowest-subtotal ties. Choose **Prefer first listed supplier** to use the first matching catalog in the displayed order.
 3. Review the supplier breakdown, quantities, and total spend. Download the individual PO CSVs, **Download Consolidated Summary CSV**, **Download PO Audit JSON**, and **Download Branded Offline PO Pack (.html)**. The files are for buyer review and supplier ordering. A hold keeps the audit with the affected source lines and withholds every order CSV and the HTML pack. [Reorder PO Pack contract](docs/subsystems/purchase-order.md)
+
+### Allocate landed costs for a shipment
+
+1. Open **Inventory Sync > Landed Cost Calculator** in Price Update Studio. Choose **Load Synthetic Container Import Demo** or upload an invoice CSV or XLSX with `SKU`, `Quantity`, and `FOB Unit Cost`. Select the exact visible **Shipment worksheet** when the workbook has multiple visible sheets. Supply positive unit weight or volume on every line if allocating by weight or CBM.
+2. Confirm the FOB invoice currency and enter the shared charges in the target store currency. When the two currencies differ, enter and confirm a manual rate in target currency per unit of invoice currency. Set the allocation method and select the FOB or CIF basis for estimating duty from your invoice rates. CIF in this calculator includes allocated freight and insurance.
+3. Compare the total FOB, shared charges, estimated duty, grand total, and per-SKU costs. Download the landed-cost CSV, audit JSON, and branded offline sheet. For a hold, use the audit's source lines to correct the input and rerun.
+4. In **Build Update**, attach the CSV as a supplier sheet and confirm the `SKU` and four-decimal `Landed Unit Cost` mappings. In **Wholesale B2B Line-Sheet**, attach the same CSV as the optional **Cost and MAP** sheet alongside the catalog. Wholesale uses `Cost`, which rounds the exact unit cost up to the next cent when a fraction remains. Check that the catalog and cost sheet use the same currency. [Input columns, calculation, and handoff](docs/subsystems/landed-cost.md)
 
 ### Review Shopify prices and download the matched files
 
@@ -238,7 +247,7 @@ From the source checkout with its locked dependencies installed, use `npm run --
 npm run --silent repair-cli -- --mode repair --platform xero-bank fixtures/xero-bank/balance-verified.csv --out-dir ./batches/xero-demo
 ```
 
-Use a separate output directory for each run. All thirteen explicit modes write `custody-manifest.json` alongside their available results.
+Use a separate output directory for each run. All fourteen explicit modes write `custody-manifest.json` alongside their available results.
 
 | Mode | Use it to prepare |
 | --- | --- |
@@ -255,6 +264,7 @@ Use a separate output directory for each run. All thirteen explicit modes write 
 | `wholesale-sheet` | A buyer matrix CSV, printable buyer HTML, a selected-tier Shopify catalog CSV, and separate internal margin files |
 | `catalog-hygiene` | Catalog diagnostics and branded offline HTML, plus one cleaned catalog and original-byte rollback per source when the batch passes |
 | `reconcile-payouts` | Individually proven payout-to-deposit pairs, exceptions, a JSON audit, and branded offline Month-End Sign-Off for review |
+| `landed-cost` | A shipment cost CSV, exact cent allocation audit, and branded offline Landed-Cost Sheet |
 
 Exit `0` means the local run passed. Exit `2` means a hold, rejected candidate, or reconciliation with exceptions. The available files remain in the batch directory for review. Exit `1` means an argument, input/output, or execution error. The unsigned manifest lists the SHA-256 of the original input bytes and each emitted result. Keep it with the originals and outputs to check for byte changes.
 
@@ -271,6 +281,8 @@ For a wholesale batch, use `--mode wholesale-sheet` with a catalog CSV, tier opt
 For a catalog audit, use `--mode catalog-hygiene` with `--platform` and `--source`. Add a second catalog to compare identities across the files. Check the source lines and available output hashes before using the results. [Runnable catalog hygiene and hold examples](docs/subsystems/cli-automation.md#catalog-hygiene)
 
 For month-end reconciliation, use `--mode reconcile-payouts --payouts <csv> --bank <csv>`. Check the lag and currency settings against the supplied files. Exit `0` means every eligible payout and incoming bank deposit reconciled with zero exceptions. Exit `2` keeps the pairs CSV, exception queue, JSON audit, offline sign-off, and custody manifest for review. [Runnable clean and exception examples](docs/subsystems/cli-automation.md#reconcile-payouts)
+
+For a landed-cost run, use `--mode landed-cost --invoice <csv|xlsx>` with the target currency, allocation method, duty basis, and shipment charges in target-currency cents. Exit `2` leaves the audit and custody manifest for review. [Runnable allocation and hold examples](docs/subsystems/cli-automation.md#landed-cost)
 
 ## Verify local processing
 

@@ -8,6 +8,7 @@ import { sha256, type RepairCustody } from '../src/core/audit/custody';
 import { cliModes, createCustodyManifest, dispatchCli, importPlatforms, storePlatforms, type CliArtifact, type CliInventorySupplier, type CliRequest, type DeltaSource, type PriceSupplier } from '../src/core/cli/dispatch';
 import { isSafeFileName, isSafeLocalPath } from '../src/core/cli/paths';
 import { PLATFORM_IDS, repairCsvWithBytes } from '../src/core/index';
+import { allocationMethods, dutyBases } from '../src/core/landed-cost/allocator';
 import { purchaseOrderPolicies } from '../src/core/purchase-order/engine';
 import { hasDuplicateKeys, profileText } from '../src/core/shopify-price-diff/settings-validation';
 import { conflictPolicies } from '../src/core/shopify-price-diff/types';
@@ -116,6 +117,8 @@ const modeFlags = {
   'wholesale-sheet': ['platform', 'baseline', 'options', 'cost-sheet', 'cost-sheet-tab', 'cost-sheet-tab-b64', 'workspace-profile'],
   'catalog-hygiene': ['platform', 'source', 'second', 'second-platform', 'trim-skus', 'strip-zero-width', 'workspace-profile'],
   'reconcile-payouts': ['payouts', 'bank', 'max-lag-days', 'payout-currency', 'bank-currency', 'workspace-profile'],
+  'landed-cost': ['invoice', 'invoice-sheet', 'invoice-sheet-b64', 'currency', 'source-currency', 'fx-rate', 'method', 'duty-base',
+    'freight-cents', 'insurance-cents', 'handling-cents', 'other-charges-cents', 'workspace-profile'],
   migrate: ['source-platform', 'target-platform'],
 };
 const booleanFlags = new Set(['help', 'exclude-paypal-memo', 'formula-guard', ...checks.map(check => `confirm-${check}`),
@@ -139,6 +142,7 @@ const modeUsage = {
   'wholesale-sheet': '--platform <store> --baseline <csv> --options <json> [--cost-sheet <csv|xlsx>] [--cost-sheet-tab <name>] [--workspace-profile <json>]',
   'catalog-hygiene': '--platform <store> --source <csv> [--second <csv> [--second-platform <store>]] [--trim-skus] [--strip-zero-width] [--workspace-profile <json>]',
   'reconcile-payouts': '--payouts <csv> --bank <csv> [--max-lag-days <0..10>] [--payout-currency <ISO>] [--bank-currency <ISO>] [--workspace-profile <json>]',
+  'landed-cost': '--invoice <csv|xlsx> --currency <ISO> --method <by-value|by-weight|by-cbm|by-units> --duty-base <FOB|CIF> --freight-cents <integer> --insurance-cents <integer> --handling-cents <integer> [--other-charges-cents <integer>] [--invoice-sheet <name>] [--source-currency <ISO> --fx-rate <rate>] [--workspace-profile <json>]',
   migrate: '--source-platform <store> --target-platform <store> <input.csv>',
 };
 
@@ -514,6 +518,18 @@ async function explicitMain(args: string[]) {
       if (profile && !profile.ok) throw new Error(profile.diagnostics.map(({ message }) => message).join('\n'));
       request = { mode, payouts, bank, maxLagDays: lag === undefined ? undefined : Number(lag),
         payoutCurrency: option('payout-currency'), bankCurrency: option('bank-currency'), branding: profile?.value.branding };
+      break;
+    }
+    case 'landed-cost': {
+      const { filename: name, bytes } = read('invoice', option('invoice'), /\.(?:csv|xlsx)$/i);
+      const profilePath = option('workspace-profile');
+      const profile = profilePath === undefined ? undefined : parseWorkspaceProfile(read('workspace-profile', profilePath, /\.json$/i).bytes);
+      if (profile && !profile.ok) throw new Error(profile.diagnostics.map(({ message }) => message).join('\n'));
+      request = { mode, source: { name, bytes, sheetName: named('invoice-sheet') },
+        options: { currency: required('currency'), sourceCurrency: option('source-currency'), fxRate: option('fx-rate'),
+          method: z.enum(allocationMethods).parse(required('method')), dutyBase: z.enum(dutyBases).parse(required('duty-base')),
+          freightCents: required('freight-cents'), insuranceCents: required('insurance-cents'), handlingCents: required('handling-cents'),
+          otherChargesCents: option('other-charges-cents'), branding: profile?.value.branding } };
       break;
     }
   }
