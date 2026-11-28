@@ -5,6 +5,7 @@ import { sha256, type PriceCustody, type RepairCustody } from '../audit/custody'
 import { buildInventorySync, inspectInventorySupplier, type InventorySupplierSource, type InventorySyncOptions } from '../inventory-sync/engine';
 import { parseBigCommerceBaseline } from '../bigcommerce-price-diff';
 import { parseBom } from '../bom/rollup';
+import { auditCatalogHygiene, type CatalogHygieneOptions, type CatalogHygieneSource } from '../catalog-hygiene/engine';
 import { buildCatalogMigration } from '../catalog-migrator/engine';
 import { buildCostCreep, costCreepFilenames, type CostCreepOptions, type CostCreepPeriod } from '../cost-creep/engine';
 import { buildPromoCampaign, type PromoCampaignOptions } from '../promo-campaign';
@@ -23,7 +24,7 @@ import { runPriceComparison } from '../whatif/simulator';
 import type { SignoffBrand } from '../branding/signoff-brand';
 import { buildWholesalePriceList, type WholesaleOptions } from '../wholesale-pricelist/engine';
 
-export const cliModes = ['repair', 'price-diff', 'verify', 'promo', 'supplier-delta', 'migrate', 'inventory-sync', 'cost-creep', 'purchase-order', 'categorize', 'wholesale-sheet'] as const;
+export const cliModes = ['repair', 'price-diff', 'verify', 'promo', 'supplier-delta', 'migrate', 'inventory-sync', 'cost-creep', 'purchase-order', 'categorize', 'wholesale-sheet', 'catalog-hygiene'] as const;
 export const storePlatforms = ['shopify', 'woocommerce', 'bigcommerce'] as const satisfies readonly StorePlatform[];
 export const importPlatforms = [...storePlatforms, 'amazon'] as const satisfies readonly ImportPlatform[];
 export type CliMode = typeof cliModes[number];
@@ -67,6 +68,7 @@ export type CliRequest =
   | { mode: 'cost-creep'; periods: readonly CostCreepPeriod[]; options?: CostCreepOptions }
   | { mode: 'purchase-order'; baseline: CliFile; suppliers: readonly PurchaseOrderSupplier[]; options?: PurchaseOrderOptions }
   | { mode: 'wholesale-sheet'; platform: StorePlatform; baseline: CliFile; options: WholesaleOptions; branding?: SignoffBrand }
+  | { mode: 'catalog-hygiene'; sources: readonly CatalogHygieneSource[]; options?: CatalogHygieneOptions }
   | ({ mode: 'categorize' } & CategorizationInput)
   | { mode: 'migrate'; source: CliFile; sourcePlatform: StorePlatform; targetPlatform: StorePlatform };
 
@@ -261,6 +263,16 @@ export async function dispatchCli(request: CliRequest): Promise<CliResult> {
         ? result('ready', audit, artifact('buyer-csv', fileNames.buyer, buyerCsv), artifact('shopify-b2b-csv', fileNames.shopify, shopifyCsv),
           artifact('buyer-line-sheet-html', fileNames.lineSheet, lineSheetHtml), artifact('internal-margin-csv', fileNames.internal, internalCsv))
         : result('blocked', audit);
+    }
+    case 'catalog-hygiene': {
+      const { status, artifacts: { issuesCsv, auditJson, reportHtml, catalogs } } =
+        await auditCatalogHygiene(request.sources, request.options);
+      return result(status === 'READY' ? 'ready' : 'blocked',
+        { role: 'issues-csv', ...issuesCsv }, { role: 'audit-json', ...auditJson }, { role: 'report-html', ...reportHtml },
+        ...catalogs.flatMap(({ sourceIndex, cleanedCsv, rollbackCsv }) => [
+          { role: 'source-' + sourceIndex + '-cleaned-csv', ...cleanedCsv },
+          { role: 'source-' + sourceIndex + '-rollback-csv', ...rollbackCsv },
+        ]));
     }
     case 'supplier-delta': return supplierDelta(request.previous, request.next);
     case 'cost-creep': {

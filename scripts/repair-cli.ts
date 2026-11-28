@@ -114,10 +114,11 @@ const modeFlags = {
     'target-location', 'target-location-b64', 'po-reference', 'po-reference-b64', 'workspace-profile'],
   categorize: ['rules', 'currency', 'credit-debit-convention', 'workspace-profile'],
   'wholesale-sheet': ['platform', 'baseline', 'options', 'cost-sheet', 'cost-sheet-tab', 'cost-sheet-tab-b64', 'workspace-profile'],
+  'catalog-hygiene': ['platform', 'source', 'second', 'second-platform', 'trim-skus', 'strip-zero-width', 'workspace-profile'],
   migrate: ['source-platform', 'target-platform'],
 };
 const booleanFlags = new Set(['help', 'exclude-paypal-memo', 'formula-guard', ...checks.map(check => `confirm-${check}`),
-  'confirm-conflict-policy', 'preserve-higher-compare-at', 'cost-check', 'approve-large-drop']);
+  'confirm-conflict-policy', 'preserve-higher-compare-at', 'cost-check', 'approve-large-drop', 'trim-skus', 'strip-zero-width']);
 const sharedFlags = ['mode', 'help', 'out-dir'];
 const repeatable = new Set([...supplierFlags, ...inventorySupplierFlags, ...periodFlags, ...orderSupplierFlags,
   ...checks.map(check => `confirm-${check}-supplier`), 'sku', 'sku-b64', 'skip-line']);
@@ -135,6 +136,7 @@ const modeUsage = {
   'purchase-order': '--baseline <csv> --supplier <csv|xlsx> [--supplier-label <label>] [--sheet <name>] … [--reorder-point <integer>] [--target-stock <integer>] [--supplier-policy <policy>] [--target-location <name>] [--po-reference <reference>] [--workspace-profile <json>]',
   categorize: '<input.csv> --rules <json> [--currency <ISO>] [--credit-debit-convention <bank|intuit>] [--workspace-profile <json>]',
   'wholesale-sheet': '--platform <store> --baseline <csv> --options <json> [--cost-sheet <csv|xlsx>] [--cost-sheet-tab <name>] [--workspace-profile <json>]',
+  'catalog-hygiene': '--platform <store> --source <csv> [--second <csv> [--second-platform <store>]] [--trim-skus] [--strip-zero-width] [--workspace-profile <json>]',
   migrate: '--source-platform <store> --target-platform <store> <input.csv>',
 };
 
@@ -484,6 +486,20 @@ async function explicitMain(args: string[]) {
       if (profile && !profile.ok) throw new Error(profile.diagnostics.map(({ message }) => message).join('\n'));
       request = { mode, platform, baseline, options: { ...settings, costSheet, worksheetName: named('cost-sheet-tab') },
         branding: profile?.value.branding };
+      break;
+    }
+    case 'catalog-hygiene': {
+      const platform = store('platform');
+      const primary = source('source');
+      const second = optional('second');
+      const secondPlatform = z.enum(storePlatforms).optional().parse(option('second-platform'));
+      if (!second && secondPlatform !== undefined) throw new Error('--second-platform requires --second.');
+      const profilePath = option('workspace-profile');
+      const workspaceProfile = profilePath === undefined ? undefined : read('workspace-profile', profilePath, /\.json$/i);
+      const profile = workspaceProfile && parseWorkspaceProfile(workspaceProfile.bytes);
+      if (profile && !profile.ok) throw new Error(profile.diagnostics.map(({ message }) => message).join('\n'));
+      request = { mode, sources: [{ ...primary, platform }, ...(second ? [{ ...second, platform: secondPlatform ?? platform }] : [])],
+        options: { trimSkus: flag('trim-skus'), stripZeroWidth: flag('strip-zero-width'), branding: profile?.value.branding, workspaceProfile } };
       break;
     }
   }

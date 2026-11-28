@@ -11,7 +11,7 @@ export interface CsvRecord {
 
 const rowSchema = z.array(z.string());
 
-export function decodeCsv(bytes: Uint8Array): { text: string; encoding: DetectedEncoding } {
+export function decodeCsv(bytes: Uint8Array, { retainNulls = false } = {}): { text: string; encoding: DetectedEncoding } {
   const utf8Bom = bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf;
   const utf16leBom = bytes[0] === 0xff && bytes[1] === 0xfe;
   const utf16beBom = bytes[0] === 0xfe && bytes[1] === 0xff;
@@ -21,7 +21,7 @@ export function decodeCsv(bytes: Uint8Array): { text: string; encoding: Detected
 
   try {
     const text = new TextDecoder(utf16leBom ? 'utf-16le' : 'utf-8', { fatal: true }).decode(bytes);
-    return text.includes('\0') ? { text: '', encoding: 'unknown' } : { text, encoding };
+    return !retainNulls && text.includes('\0') ? { text: '', encoding: 'unknown' } : { text, encoding };
   } catch {
     if (utf8Bom || utf16leBom || bytes.includes(0)) return { text: '', encoding: 'unknown' };
     return { text: new TextDecoder('windows-1252').decode(bytes), encoding: 'windows-1252' };

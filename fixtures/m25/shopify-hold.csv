@@ -1,0 +1,6 @@
+Handle,Title,Variant SKU,Variant Price,Variant Barcode,Body (HTML)
+aurora-mug,Aurora Mug,AURORA-01,18.50,4006381333932,"First line of description
+Second line with ""quotes""."
+
+trail-cup,Trail Cup,aurora-01,24.00,012345678905,
+harbor-flask,Harbor Flask,HARBOR-03,28.00,00012345678905,

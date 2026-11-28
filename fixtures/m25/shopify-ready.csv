@@ -1,0 +1,5 @@
+URL handle,Title,SKU,Price,Barcode,Product image URL,Description
+aurora-mug,Aurora Mug," AURORA-01 ",18.50,01234​5678905,,"First line of description
+Second line with ""quotes""."
+aurora-mug,,,,,https://assets.example.test/aurora-mug.png,
+trail-cup,Trail Cup,TRAIL-02,24.00,4006381333931,,

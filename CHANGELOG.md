@@ -1,5 +1,11 @@
 # Changelog
 
+## v2.5.0 (M25)
+
+- Open **Verify Update / Rollback CSV > Catalog & Barcode Hygiene** to audit a Shopify, WooCommerce, or legacy BigCommerce catalog CSV. Add a second catalog to find collisions across both files. Review source lines, conflicting SKUs, and the supplied and expected digits for GS1 checksum failures.
+- Review optional SKU trimming and removal of allowlisted zero-width characters. A blocking finding withholds the cleaned catalogs and their rollback files. The issues CSV, JSON audit, and branded offline report remain available. Each available rollback contains the exact original CSV bytes.
+- Use `repair-cli --mode catalog-hygiene` to run the checks locally and record file hashes in the custody manifest. Exit `2` leaves the diagnostics available for review.
+
 ## v2.4.0 (M24)
 
 - Open **Sale Campaign Pack > Wholesale B2B Line-Sheet** to configure up to five tiers from a Shopify, WooCommerce, or legacy BigCommerce catalog. Calculate percent-off-retail or cost-plus prices and review cost, gross-margin, MAP, and tier-order checks before sharing the sheet.

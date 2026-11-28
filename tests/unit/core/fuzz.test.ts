@@ -11,6 +11,7 @@ import { analyzeCatalogImpact, createCatalogImpact } from '../../../src/core/ana
 import { parseBigCommerceBaseline } from '../../../src/core/bigcommerce-price-diff/source';
 import { SIGNOFF_ACCENTS, brandSignoffHtml, type SignoffBrand } from '../../../src/core/branding/signoff-brand';
 import { brandCatalogMigrationReports, buildCatalogMigration, type CatalogPlatform } from '../../../src/core/catalog-migrator/engine';
+import { auditCatalogHygiene, validateGtin } from '../../../src/core/catalog-hygiene/engine';
 import { readBigCommerce } from '../../../src/core/catalog-migrator/bigcommerce';
 import { readShopify } from '../../../src/core/catalog-migrator/shopify';
 import { readWooCommerceCatalog } from '../../../src/core/catalog-migrator/woocommerce';
@@ -2505,7 +2506,94 @@ describe('M24 deterministic wholesale pricing, confidentiality, and floor replay
   }, 120_000);
 });
 
-it('accounts for all 47,920 seeded executions without skips', () => {
-  expect(fuzzExecutions).toEqual({ accepted: 47_920, discarded: 0, properties: 76 });
+describe('M25 Catalog and Barcode Hygiene adversarial cases', () => {
+  it('tests 1,250 payloads across every GS1 length and rejects all nine mutations at every digit', () => {
+    checkFuzz(fc.property(
+      fc.array(fc.integer({ min: 0, max: 9 }), { minLength: 13, maxLength: 13 }), fc.boolean(),
+      (digits, forceLeadingZero) => {
+        if (forceLeadingZero) digits = [0, ...digits.slice(1)];
+        for (const length of [8, 12, 13, 14]) {
+          const payload = digits.slice(0, length - 1);
+          // Independent left-based weights, including the different GTIN-13 parity.
+          const factors = length === 13 ? [1, 3] : [3, 1];
+          const total = payload.reduce((sum, digit, index) => sum + digit * factors[index % 2], 0);
+          const expected = String(Math.ceil(total / 10) * 10 - total);
+          const original = payload.join('') + expected;
+          expect(validateGtin(original)).toEqual({ valid: true, expectedCheckDigit: expected, suppliedCheckDigit: expected });
+          for (let index = 0; index < original.length; index++) {
+            for (const digit of '0123456789') {
+              if (digit === original[index]) continue;
+              const tampered = original.slice(0, index) + digit + original.slice(index + 1);
+              if (validateGtin(tampered).valid) throw new Error('GS1 accepted tampered ' + tampered + ' at index ' + index);
+            }
+          }
+        }
+      },
+    ), { seed: seed + 76, numRuns: 1_250 });
+  }, 120_000);
+
+  it('holds 650 cross-file SKU collisions using true multiline and blank-record source coordinates', async () => {
+    await checkAsyncFuzz(fc.asyncProperty(
+      fc.nat({ max: 999_999 }), fc.nat({ max: 7 }), fc.nat({ max: 7 }),
+      fc.constantFrom('exact', 'case', 'cleanup'), fc.boolean(),
+      async (number, linesA, linesB, kind, optIn) => {
+        const sku = 'ITEM-' + String(number).padStart(6, '0');
+        const other = kind === 'exact' ? sku : kind === 'case' ? sku.toLowerCase() : ' ' + sku.toLowerCase() + '\u200b ';
+        const input = (filename: string, suffix: string, lines: number, identity: string) => ({
+          filename, platform: 'shopify' as const,
+          bytes: csvBytes(['Handle', 'Title', 'SKU', 'Price', 'Barcodes', 'Description'], [
+            ['lead-' + suffix, 'Lead', 'LEAD-' + suffix, '12', '', 'line "quoted"\n'.repeat(lines) + 'end'],
+            [''],
+            ['product-' + suffix, 'Product', identity, '1.20', '', ''],
+          ]),
+        });
+        const result = await auditCatalogHygiene([input('one.csv', 'a', linesA, sku), input('two.csv', 'b', linesB, other)],
+          { trimSkus: optIn, stripZeroWidth: optIn });
+        expect(result.status).toBe('HOLD');
+        expect(result.summary.duplicateSkus).toBe(2);
+        expect(result.issues).toContainEqual(expect.objectContaining({
+          code: 'duplicate-sku-' + kind, sourceIndex: 1, line: linesA + 4, related: [{ sourceIndex: 2, line: linesB + 4 }],
+        }));
+        expect(result.artifacts.catalogs).toEqual([]);
+        expect(JSON.parse(new TextDecoder().decode(result.artifacts.auditJson.bytes)).custody.outputs.map(({ filename }: { filename: string }) => filename))
+          .toEqual(['catalog-hygiene-issues.csv', 'catalog-hygiene-report.html']);
+      },
+    ), { seed: seed + 77, numRuns: 650 });
+  }, 120_000);
+
+  it('reparses 600 scoped native cleanups and restores the literal BOM, quotes and line-ending bytes', async () => {
+    await checkAsyncFuzz(fc.asyncProperty(
+      fc.nat({ max: 999_999 }), fc.constantFrom('\n', '\r\n', '\r'), fc.constantFrom('utf8', 'utf8bom', 'utf16le', 'latin1'),
+      fc.nat({ max: 6 }), fc.boolean(),
+      async (number, separator, encoding, lineCount, finalSeparator) => {
+        const sku = String(number).padStart(8, '0');
+        const zeroWidth = encoding === 'latin1' ? '' : '\u200b';
+        const originalBarcode = '012345678905';
+        const dirty = originalBarcode.slice(0, 5) + zeroWidth + originalBarcode.slice(5);
+        const comment = '"Café ""Shelf""' + separator.repeat(lineCount) + 'end"';
+        const csv = 'Handle,Title,SKU,Price,Barcode,Description' + separator + separator +
+          'shelf,Shelf," ' + sku + ' ",15.05,' + dirty + ',' + comment + (finalSeparator ? separator : '');
+        const original = Buffer.concat([
+          Buffer.from(encoding === 'utf8bom' ? [0xef, 0xbb, 0xbf] : encoding === 'utf16le' ? [0xff, 0xfe] : []),
+          Buffer.from(csv, encoding === 'utf8bom' ? 'utf8' : encoding),
+        ]);
+        const result = await auditCatalogHygiene([{ filename: 'shop.csv', platform: 'shopify', bytes: original }],
+          { trimSkus: true, stripZeroWidth: true });
+        expect(result.status, JSON.stringify(result.issues)).toBe('READY');
+        const [{ cleanedCsv, rollbackCsv }] = result.artifacts.catalogs;
+        expect(Buffer.from(rollbackCsv.bytes).equals(original)).toBe(true);
+        const matrix = (payload: Uint8Array) => parseCsv(decodeCsv(payload).text).records.map(record => record.cells);
+        const expected = matrix(original);
+        expected[2][2] = sku;
+        expected[2][4] = originalBarcode;
+        expect(matrix(cleanedCsv.bytes)).toEqual(expected);
+        expect(result.summary).toMatchObject({ safeTrimFixes: 1, safeZeroWidthFixes: zeroWidth ? 1 : 0 });
+      },
+    ), { seed: seed + 78, numRuns: 600 });
+  }, 120_000);
+});
+
+it('accounts for all 50,420 seeded executions without skips', () => {
+  expect(fuzzExecutions).toEqual({ accepted: 50_420, discarded: 0, properties: 79 });
   console.info(`Deterministic fuzz: ${fuzzExecutions.accepted} accepted, ${fuzzExecutions.discarded} discarded across ${fuzzExecutions.properties} properties.`);
 });

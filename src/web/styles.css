@@ -775,6 +775,8 @@ code { font-family: var(--mono); }
 .price-exports p:not(.export-warning) { margin-bottom: 9px; color: var(--muted); font-size: .88rem; line-height: 1.45; }
 .price-exports p.price-verification { color: var(--teal-strong); }
 
+.price-section.verify-workflow { padding-block: 12px 0; }
+.verify-workflow .price-platform-toggle { max-width: 100%; flex-wrap: wrap; }
 .verify-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin-top: 12px; }
 .verify-generated { overflow-wrap: anywhere; }
 .verify-paired-input { margin-top: 12px; }

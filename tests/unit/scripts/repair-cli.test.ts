@@ -30,6 +30,8 @@ const poSpawnTimeout = 40_000;
 const poTestTimeout = 100_000;
 const categorizeSpawnTimeout = 40_000;
 const categorizeTestTimeout = 160_000;
+const hygieneSpawnTimeout = 40_000;
+const hygieneTestTimeout = 100_000;
 let scratch: string;
 
 beforeAll(() => {
@@ -79,12 +81,64 @@ function verifyReceipt(mode: string, code: 0 | 2, status: string, directory: str
   expect(roles.size).toBe(outputFiles.length);
   for (const { role, filename } of manifest.outputs) expect(manifest.outputs.find((file: { role: string }) => file.role === role))
     .toEqual(fingerprint(role, resolve(outputPath, filename)));
-  if (code === 2) expect(outputFiles.every(file => !file.endsWith('.csv'))).toBe(true);
+  if (code === 2) expect(outputFiles.filter(file => file.endsWith('.csv')))
+    .toEqual(mode === 'catalog-hygiene' ? ['catalog-hygiene-issues.csv'] : []);
   return run;
 }
 
 const pricingHeaders = 'Handle,Title,Option1 Name,Option1 Value,Variant SKU,Variant Price,Variant Compare At Price,Cost per item\n';
 const catalog = (price: string) => pricingHeaders + `part,Spare Part,Title,Default Title,0001,${price},,5.00\nkit,Bundle,Title,Default Title,KIT,20.00,,10.00\n`;
+
+describe('M25 catalog-hygiene CLI subprocess', () => {
+  const reports = ['catalog-hygiene-issues.csv', 'catalog-hygiene-audit.json', 'catalog-hygiene-report.html'];
+  const readAudit = (directory: string) => JSON.parse(readFileSync(resolve(directory, reports[1]), 'utf8'));
+  it('publishes independent verified pairs and hashes the exact workspace profile', () => {
+    const source = fixture('m25/shopify-ready.csv');
+    const second = content('second-shop.csv', 'Handle,Title,SKU,Price,Barcode\nsecond,Second Store,SECOND-1,1.99,96385074\n');
+    const profile = content('hygiene-brand.json', serializeWorkspaceProfile({ version: 1, storeName: 'Northstar Supply', platform: 'shopify', storeCurrency: 'USD',
+      branding: { agencyName: 'Northstar Studio', preparedFor: 'Harbor Shops', contactNote: '', accentKey: 'forest' } }));
+    const output = resolve(scratch, 'hygiene-ready');
+    const pairs = [1, 2].flatMap(index => ['cleaned', 'rollback'].map(kind => 'catalog-hygiene-source-' + index + '-' + kind + '.csv'));
+    verifyReceipt('catalog-hygiene', 0, 'ready', output, ['--platform', 'shopify', '--source', source, '--second', second,
+      '--trim-skus', '--strip-zero-width', '--workspace-profile', profile], { source, second, 'workspace-profile': profile },
+    [...reports, ...pairs], undefined, hygieneSpawnTimeout);
+    const file = (filename: string) => readFileSync(resolve(output, filename));
+    expect(file(pairs[1])).toEqual(readFileSync(source));
+    expect(file(pairs[3])).toEqual(readFileSync(second));
+    const row = parseCsv(file(pairs[0]).toString('utf8')).records.find(({ line }) => line === 2);
+    expect(row?.cells.slice(2, 5)).toEqual(['AURORA-01', '18.50', '012345678905']);
+    expect(file(reports[2]).toString('utf8')).toContain('Northstar Studio');
+    const audit = readAudit(output);
+    expect(audit.status).toBe('READY');
+    expect(audit.custody.workspaceProfile).toMatchObject({ filename: basename(profile), sha256: digest(readFileSync(profile)) });
+    expect(audit.custody.outputs).toEqual([reports[0], reports[2], ...pairs].map(filename => {
+      const bytes = file(filename);
+      return { filename, byteLength: bytes.length, sha256: digest(bytes) };
+    }));
+  }, hygieneTestTimeout);
+
+  it('exits 2 and publishes only diagnostic artifacts on a bad EAN or a cross-platform SKU collision', () => {
+    const source = fixture('m25/shopify-hold.csv');
+    const hold = resolve(scratch, 'hygiene-held');
+    verifyReceipt('catalog-hygiene', 2, 'blocked', hold, ['--platform', 'shopify', '--source', source], { source }, reports, undefined, hygieneSpawnTimeout);
+    const audit = readAudit(hold);
+    expect(audit.issues).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'invalid-gtin-check-digit', line: 2, suppliedCheckDigit: '2', expectedCheckDigit: '1' }),
+      expect.objectContaining({ code: 'duplicate-sku-case', line: 2, related: [{ sourceIndex: 1, line: 5 }] }),
+    ]));
+    expect(audit.custody.outputs.map(({ filename }: { filename: string }) => filename)).toEqual([reports[0], reports[2]]);
+
+    const primary = fixture('m25/shopify-ready.csv');
+    const second = fixture('m25/woocommerce-second.csv');
+    const cross = resolve(scratch, 'hygiene-cross-held');
+    verifyReceipt('catalog-hygiene', 2, 'blocked', cross, ['--platform', 'shopify', '--source', primary,
+      '--second', second, '--second-platform', 'woocommerce', '--trim-skus', '--strip-zero-width'], { source: primary, second },
+    reports, undefined, hygieneSpawnTimeout);
+    expect(readAudit(cross).issues).toContainEqual(expect.objectContaining({
+      code: 'duplicate-sku-cleanup', sourceIndex: 1, line: 2, related: [{ sourceIndex: 2, line: 2 }],
+    }));
+  }, hygieneTestTimeout);
+});
 
 describe('M24 wholesale-sheet CLI subprocess', () => {
   const baseline = fixture('m24/wholesale-shopify.csv');

@@ -141,7 +141,17 @@ export async function auditPage(page: Page, phase: 'idle' | 'dialog' | 'workbenc
   const samples: (typeof measures.native[number] & { png: string })[] = [];
   const root = phase === 'dialog' ? page.getByRole('dialog') : page.locator('body');
   for (const native of measures.native) {
-    const bytes = await root.locator(measures.selector).nth(native.index).screenshot({ animations: 'disabled' });
+    const control = root.locator(measures.selector).nth(native.index);
+    // A keyboard scroll can still be moving while Edge captures the locator's pixels.
+    await expect.poll(() => control.evaluate(async element => {
+      element.scrollIntoView({ block: 'center', inline: 'center', behavior: 'instant' });
+      const first = element.getBoundingClientRect();
+      await new Promise<void>(done => requestAnimationFrame(() => requestAnimationFrame(() => done())));
+      const { left, top, width, height } = element.getBoundingClientRect();
+      return first.left === left && first.top === top &&
+        document.elementFromPoint(left + width / 2, top + height / 2) === element;
+    }), { message: 'The native ' + native.type + ' is stationary and visible at its center' }).toBe(true);
+    const bytes = await control.screenshot({ animations: 'disabled' });
     samples.push({ ...native, png: bytes.toString('base64') });
   }
   const nativeRatios = await page.evaluate(async (items) => {

@@ -1,4 +1,4 @@
-import { useId, useLayoutEffect, useRef, useState } from 'react';
+import { lazy, Suspense, useId, useLayoutEffect, useRef, useState } from 'react';
 import type { ImportPlatform } from '../../core/verify-import/inspector';
 import type { WorkbenchWorker } from '../../core/worker/client';
 import type { InspectionSummary } from '../../core/worker/protocol';
@@ -11,6 +11,8 @@ import type { GeneratedPairSource } from './PriceDiffWorkbench';
 import { PriceFileInput } from './PriceFileInput';
 import { useWorkerSession, WorkerStatus } from './workerSession';
 import { PRICE_UPDATE_PLATFORMS } from './WorkspaceProfile';
+
+const CatalogHygienePanel = lazy(() => import('./catalog-hygiene/CatalogHygienePanel'));
 
 type FileRole = 'baseline' | 'candidate' | 'pairedUpdate';
 type CandidateKind = 'update' | 'rollback';
@@ -25,7 +27,44 @@ const FILE_FIELDS = {
   pairedUpdate: { title: 'Matching update CSV', formats: 'Drop the update that the rollback should reverse', label: 'Choose matching update CSV', accept: '.csv' },
 };
 
-export default function VerifyImportPanel({ pairSource, buildPlatform }: { pairSource: GeneratedPairSource | null; buildPlatform: ImportPlatform }) {
+interface VerifyInput {
+  pairSource: GeneratedPairSource | null;
+  buildPlatform: ImportPlatform;
+}
+
+export default function VerifyImportPanel({ active, hygieneSelected, onViewChange, ...verify }: VerifyInput & {
+  active: boolean;
+  hygieneSelected: boolean;
+  onViewChange: (hygiene: boolean) => void;
+}) {
+  const id = useId();
+  const [hygieneVisited, setHygieneVisited] = useState(false);
+
+  return (
+    <>
+      <div className="price-section verify-workflow">
+        <div className="price-platform-toggle" role="group" aria-label="CSV verification view">
+          <button type="button" aria-pressed={!hygieneSelected} aria-controls={`${id}-verify`}
+            onClick={() => onViewChange(false)}>Verify Update / Rollback</button>
+          <button type="button" aria-pressed={hygieneSelected} aria-controls={`${id}-hygiene`} onClick={() => {
+            setHygieneVisited(true);
+            onViewChange(true);
+          }}>Catalog &amp; Barcode Hygiene</button>
+        </div>
+      </div>
+      <div id={`${id}-verify`} hidden={hygieneSelected}><VerifyUpdatePanel {...verify} /></div>
+      <div id={`${id}-hygiene`} hidden={!hygieneSelected}>
+        {hygieneVisited ? (
+          <Suspense fallback={<p className="price-section" role="status">Opening Catalog &amp; Barcode Hygiene…</p>}>
+            <CatalogHygienePanel active={active && hygieneSelected} />
+          </Suspense>
+        ) : null}
+      </div>
+    </>
+  );
+}
+
+function VerifyUpdatePanel({ pairSource, buildPlatform }: VerifyInput) {
   const id = useId();
   const heading = useRef<HTMLHeadingElement>(null);
   const [localPlatform, setLocalPlatform] = useState<ImportPlatform>();

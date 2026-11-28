@@ -6,6 +6,8 @@ ImportMedic compares a Shopify, WooCommerce, or legacy BigCommerce product expor
 
 **Verify Before Import** inspects an existing update or rollback against the original Shopify, WooCommerce, legacy BigCommerce, or Amazon Price & Quantity file. It checks SKU identity, allowed price and stock changes, and catalog grouping where applicable. It fingerprints the supplied files in the browser. Store checks and imports take place in the store's admin.
 
+**Catalog & Barcode Hygiene** audits one or two product catalog CSVs for SKU collisions, GS1 check digits, shared barcodes, and damaged identifiers. Review findings by source and physical line, then download the audit and branded offline report. A passing run also offers a cleaned native CSV and exact original rollback for each source.
+
 **Sale Campaign Pack** prepares a discount and its matched revert from one product export. It previews the final sale prices against a required minimum retail floor and packages the pair with a JSON audit and offline Campaign Sign-Off report.
 
 **Wholesale B2B Line-Sheet** builds up to five tiers from a product export, checks rounded prices and ordering, and prepares a buyer matrix, printable offline sheet, and one-tier Shopify B2B catalog CSV. Use the separate internal margin files to review landed costs and floor checks.
@@ -43,6 +45,13 @@ Open the price update workbench and choose **Load Synthetic Agency Demo** for a 
 With a baseline and candidate alone, zero residual differences means the supplied scoped cells agree with the original values. To verify that a rollback covers and reverses a particular update, use the actual matched update. Check the intended values and the current catalog before importing either file. Store login and live changes happen in the store's admin.
 
 Open **Shortcuts (?)** or press `?` outside text entry. Press `/` to focus workbench search when available. Use `Escape` to close the dialog or cancel an active edit and return to its trigger. The dialog has a switch to turn off single-character shortcuts.
+
+### Audit catalog SKUs and barcodes
+
+1. Open **Verify Update / Rollback CSV > Catalog & Barcode Hygiene**. Select a platform and choose its native product catalog CSV. Choose a second platform and CSV to check for collisions across both sources. Use **Load Synthetic GS1 & Duplicate SKU Audit Demo** to inspect a held example.
+2. Filter the issues and compare each finding with its physical line in the source file. GS1 Mod 10 checks the final digit of EAN-8, UPC-A, EAN-13, and GTIN-14 strings, preserving leading zeros. Check assignment and product identity separately through GS1 when needed. [GS1 General Specifications](https://ref.gs1.org/standards/genspecs/23.0.0/) · [Verified by GS1](https://support.gs1.org/support/solutions/articles/43000734070/)
+3. Review **Trim outer SKU whitespace** and **Remove allowlisted zero-width characters**. Both are opt-in. Resolve blocking findings in the original catalog and re-run the audit. ImportMedic keeps every row and leaves barcode digits and prices to the operator.
+4. Download the issues CSV, audit JSON, and branded offline HTML. When the run passes, keep each cleaned catalog with its original-byte rollback and compare their SHA-256 hashes with the audit before editing or resaving. Review any store import separately in the store's admin. [Supported headers, issue codes, and output files](docs/subsystems/catalog-hygiene.md)
 
 ### Prepare an Amazon Price & Quantity update
 
@@ -173,7 +182,7 @@ Open **Workspace profile** and set the store name and currency. Select **Save Wo
 
 ### Brand an offline sign-off
 
-Open **Workspace profile** and expand **Agency Sign-Off Branding**. Enter **Agency name** and choose Forest, Navy, Slate, or Burgundy. Use **Prepared for** and **Contact email or note** if needed. Check the preview before downloading a Client, Campaign, Supplier Delta, Migration, or Inventory Sign-Off, a Vendor Negotiation Brief, or a Reorder PO Pack from the price workbench. The report includes the supplied branding as text and opens offline.
+Open **Workspace profile** and expand **Agency Sign-Off Branding**. Enter **Agency name** and choose Forest, Navy, Slate, or Burgundy. Use **Prepared for** and **Contact email or note** if needed. Check the preview before downloading a Client, Campaign, Supplier Delta, Migration, or Inventory Sign-Off, a Vendor Negotiation Brief, a Reorder PO Pack, or the offline Catalog Hygiene report from the price workbench. The report includes the supplied branding as text and opens offline.
 
 Save the Workspace Profile JSON to reuse the branding after navigating away. In the home workbench, complete a repair and open **Agency Sign-Off Branding** by the Bookkeeper export. Set the branding there or use **Load Workspace Profile (.json)** to bring in the same branding before downloading the Bookkeeper Sign-Off. [Branding and Workspace Profile contract](docs/subsystems/web-ui-seo.md#agency-sign-off-branding)
 
@@ -221,7 +230,7 @@ From the source checkout with its locked dependencies installed, use `npm run --
 npm run --silent repair-cli -- --mode repair --platform xero-bank fixtures/xero-bank/balance-verified.csv --out-dir ./batches/xero-demo
 ```
 
-Use a separate output directory for each run. All eleven explicit modes write `custody-manifest.json` alongside their available results.
+Use a separate output directory for each run. All twelve explicit modes write `custody-manifest.json` alongside their available results.
 
 | Mode | Use it to prepare |
 | --- | --- |
@@ -236,6 +245,7 @@ Use a separate output directory for each run. All eleven explicit modes write `c
 | `purchase-order` | A supplier split PO pack with one CSV per chosen supplier, a consolidated summary, a JSON audit, and printable offline HTML |
 | `categorize` | A categorized transaction CSV, a per-currency account summary, a JSON audit, and offline Bookkeeper Categorization Sign-Off |
 | `wholesale-sheet` | A buyer matrix CSV, printable buyer HTML, a selected-tier Shopify catalog CSV, and separate internal margin files |
+| `catalog-hygiene` | Catalog diagnostics and branded offline HTML, plus one cleaned catalog and original-byte rollback per source when the batch passes |
 
 Exit `0` means the local run passed. Exit `2` means the run held the CSV or rejected the candidate and left diagnostic files. Exit `1` means an argument, input/output, or execution error. The unsigned manifest lists the SHA-256 of the original input bytes and each emitted result. Keep it with the originals and outputs to check for byte changes.
 
@@ -248,6 +258,8 @@ For a reorder batch, use `--mode purchase-order` with one inventory CSV and one 
 For a bookkeeping review batch, use `--mode categorize` with a transaction CSV and `--rules <rules.json>`. Compare the CSV and HTML bytes against the audit before resaving the downloads. [Runnable categorization and hold examples](docs/subsystems/cli-automation.md#categorize)
 
 For a wholesale batch, use `--mode wholesale-sheet` with a catalog CSV, tier options, and optional landed cost and MAP input. Check the audit and custody manifest for a hold or compare the ready outputs byte for byte with their reported hashes. [Runnable wholesale and hold examples](docs/subsystems/cli-automation.md#wholesale-sheet)
+
+For a catalog audit, use `--mode catalog-hygiene` with `--platform` and `--source`. Add a second catalog to compare identities across the files. Check the source lines and available output hashes before using the results. [Runnable catalog hygiene and hold examples](docs/subsystems/cli-automation.md#catalog-hygiene)
 
 ## Verify local processing
 

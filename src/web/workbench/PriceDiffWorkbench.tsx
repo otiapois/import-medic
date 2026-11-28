@@ -157,6 +157,7 @@ export function PriceDiffWorkbench({ characterKeys }: { characterKeys: boolean }
   const heading = useId();
   const [mode, setMode] = useState<StudioMode>('build');
   const [verifyVisited, setVerifyVisited] = useState(false);
+  const [hygieneSelected, setHygieneSelected] = useState(false);
   const [campaignVisited, setCampaignVisited] = useState(false);
   const [deltaVisited, setDeltaVisited] = useState(false);
   const [migrationVisited, setMigrationVisited] = useState(false);
@@ -516,6 +517,7 @@ export function PriceDiffWorkbench({ characterKeys }: { characterKeys: boolean }
   }
 
   function openCampaignVerification() {
+    setHygieneSelected(false);
     changeMode('verify');
     document.getElementById(`${heading}-verify-tab`)?.focus({ preventScroll: true });
   }
@@ -693,7 +695,8 @@ export function PriceDiffWorkbench({ characterKeys }: { characterKeys: boolean }
         className="workbench-input price-studio-pane" hidden={mode !== 'verify'}>
         {verifyVisited ? (
           <Suspense fallback={<p className="price-section" role="status">Opening CSV verification…</p>}>
-            <VerifyImportPanel pairSource={pairSource} buildPlatform={buildPlatform} />
+            <VerifyImportPanel pairSource={pairSource} buildPlatform={buildPlatform} active={mode === 'verify'}
+              hygieneSelected={hygieneSelected} onViewChange={setHygieneSelected} />
           </Suspense>
         ) : null}
       </div>

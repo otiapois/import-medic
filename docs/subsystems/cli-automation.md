@@ -16,7 +16,7 @@ Every explicit mode needs `--mode <mode>` and `--out-dir <dir>`. Choose a new or
 | Exit | Meaning | Files |
 | --- | --- | --- |
 | `0` | The run completed and passed its local checks. `verify` reports `PASS`. A price diff or inventory sync with no changes can pass without a native pair. | Available mode outputs and `custody-manifest.json` |
-| `2` | The run completed with a hold or unsafe result. `verify` reports `FAIL_UNSAFE`. | Diagnostic JSON, `custody-manifest.json`, and a review HTML report where the mode provides one for held runs. CSV outputs are withheld. |
+| `2` | The run completed with a hold or unsafe result. `verify` reports `FAIL_UNSAFE`. | Diagnostic JSON, `custody-manifest.json`, and any mode-specific review HTML or diagnostic CSV. Native and other work product CSVs are withheld. |
 | `1` | Usage, filesystem, or execution error. | Read stderr and treat the run as failed. A completed batch receipt is unavailable. |
 
 A completed explicit batch with exit `0` or `2` writes one JSON line to stdout with `mode`, `status`, `exitCode`, and `outputs`, an array of the output filenames including the manifest. Use `npm run --silent repair-cli -- …` to suppress npm's script banner. `verify` uses `PASS` or `FAIL_UNSAFE`. The other modes use `ready` or `blocked`, with `no-changes` for a valid price diff or inventory sync that would leave the relevant quantities or catalog cells unchanged. A help invocation prints usage text.
@@ -247,6 +247,28 @@ npm run --silent repair-cli -- --mode wholesale-sheet --platform shopify --basel
 The first command exits `0`. Check SKU `00007` for Bronze, Silver, and Gold unit prices of `39.96`, `34.97`, and `29.97` USD and minimum order quantities of `12`, `54`, and `102`. The Shopify CSV addresses `Northstar Wholesale Silver` and carries the Silver price `34.97` and quantity fields `6` and `54` for this SKU. Review the buyer files against the public field list. Compare the catalog, cost sheet, and four export hashes against the internal audit. Check the CLI manifest for every file, including the exact options JSON and audit hashes.
 
 The second command exits `2`. The `35.00` MAP for `00007` holds Silver and Gold. Check the physical line 2 evidence and confirm the directory contains only `wholesale-margin-audit.json` and `custody-manifest.json`. [Tier rules, buyer fields, and Shopify review](wholesale-pricelist.md)
+
+## catalog-hygiene
+
+Give `--platform <shopify|woocommerce|bigcommerce>` and `--source <catalog.csv>`. For BigCommerce, supply a legacy Bulk Edit product CSV. Use a fresh `--out-dir` for each run.
+
+| Flag | Value or use |
+| --- | --- |
+| `--second <catalog.csv>` | Optional second native catalog to include in the same collision check |
+| `--second-platform <shopify|woocommerce|bigcommerce>` | Platform for `--second`. Defaults to the primary platform. This flag requires a second catalog. |
+| `--trim-skus` | Trim outer SKU whitespace where the projected SKU remains safe |
+| `--strip-zero-width` | Remove allowlisted U+200B and U+FEFF from eligible identifiers |
+| `--workspace-profile <profile.json>` | Apply saved Agency Sign-Off Branding in the offline HTML |
+
+```sh
+npm run --silent repair-cli -- --mode catalog-hygiene --platform shopify --source fixtures/m25/shopify-ready.csv --trim-skus --strip-zero-width --out-dir ./batches/hygiene-demo
+npm run --silent repair-cli -- --mode catalog-hygiene --platform shopify --source fixtures/m25/shopify-hold.csv --out-dir ./batches/hygiene-hold
+npm run --silent repair-cli -- --mode catalog-hygiene --platform shopify --source fixtures/m25/shopify-ready.csv --second fixtures/m25/woocommerce-second.csv --second-platform woocommerce --trim-skus --strip-zero-width --out-dir ./batches/hygiene-cross-file
+```
+
+The first command exits `0`. In source 1's cleaned CSV, compare line 2's SKU `AURORA-01` and UPC-A `012345678905` with the source. Verify the source 1 rollback is byte-identical to the original CSV. The second command exits `2`. Line 2 carries `4006381333932`, with supplied check digit `2` and expected `1`. Compare the case-variant SKU at lines 2 and 5 and the barcode collision at lines 5 and 6. The third command exits `2`. Review the SKU collision at physical line 2 in each input.
+
+Each completed run writes `catalog-hygiene-issues.csv`, `catalog-hygiene-audit.json`, `catalog-hygiene-report.html`, and `custody-manifest.json`. Ready runs add `catalog-hygiene-source-<N>-cleaned.csv` and `catalog-hygiene-source-<N>-rollback.csv` for the available sources. On exit `2`, confirm that both kinds of native catalog files are withheld for every source. Check the manifest's input roles `source`, `second` and `workspace-profile` for the files supplied, its diagnostic roles `issues-csv`, `audit-json`, and `report-html`, and its ready output roles `source-<N>-cleaned-csv` and `source-<N>-rollback-csv`. [Catalog checks and file contract](catalog-hygiene.md)
 
 ## Legacy single-file repair
 

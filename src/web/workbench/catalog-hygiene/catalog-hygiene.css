@@ -1,0 +1,71 @@
+.catalog-hygiene {
+  display: grid;
+  gap: 14px;
+  overflow-wrap: anywhere;
+}
+.catalog-hygiene .price-heading { align-items: start; }
+.catalog-hygiene .price-heading > div { flex: 1 1 320px; }
+.catalog-hygiene .price-heading .button { max-width: 100%; }
+.catalog-hygiene-sources { margin-top: 0; }
+.catalog-hygiene-sources > div { display: grid; gap: 8px; align-content: start; min-width: 0; }
+.catalog-hygiene-sources .price-sheet { margin-top: 0; }
+.catalog-hygiene-options {
+  min-width: 0;
+  padding: 6px 12px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+.catalog-hygiene-options legend { padding-inline: 4px; font-size: .91rem; font-weight: 700; }
+.catalog-hygiene-options > div { display: flex; flex-wrap: wrap; gap: 2px 20px; }
+.catalog-hygiene-options .checkbox-label { font-size: .875rem; font-weight: 650; }
+.catalog-hygiene-options .field-help { margin-top: 2px; }
+.catalog-hygiene .signoff-branding { margin-top: 0; }
+.catalog-hygiene-status {
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f6faf9;
+  font-size: .9rem;
+  font-weight: 650;
+}
+.catalog-hygiene-status[data-state='ready'] { color: var(--teal-strong); background: var(--teal-soft); border-color: var(--control-line); }
+.catalog-hygiene-status[data-state='hold'] { color: var(--amber); background: var(--amber-soft); border-color: #bc7d23; }
+.catalog-hygiene-results { display: grid; gap: 10px; min-width: 0; }
+.catalog-hygiene-results h3 { font-size: 1rem; font-weight: 720; }
+.catalog-hygiene-metrics { grid-template-columns: repeat(4, minmax(0, 1fr)); margin: 0; }
+.catalog-hygiene-downloads { display: grid; gap: 7px; margin-top: 4px; }
+.catalog-hygiene-pairs { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 8px; }
+.catalog-hygiene-pair { display: grid; gap: 8px; padding: 9px 11px; border: 1px solid var(--line); border-radius: 8px; }
+.catalog-hygiene-pair-source { display: flex; flex-wrap: wrap; gap: 3px 9px; font-size: .875rem; }
+.catalog-hygiene-pair-source span { color: var(--muted); }
+.catalog-hygiene-issues { margin-top: 6px; border-top: 1px solid var(--line); padding-top: 12px; }
+.catalog-hygiene-issues-header { display: flex; flex-wrap: wrap; align-items: end; justify-content: space-between; gap: 7px 14px; margin-bottom: 8px; }
+.catalog-hygiene-issues .price-sheet { width: min(100%, 270px); margin-top: 0; }
+.catalog-hygiene-issue-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 8px; }
+.catalog-hygiene-issue {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-inline-start: 3px solid #bc7d23;
+  border-radius: 7px;
+  background: var(--surface);
+  font-size: .875rem;
+}
+.catalog-hygiene-issue[data-level='fixed'] { border-inline-start-color: var(--teal); }
+.catalog-hygiene-issue-header { display: flex; flex-wrap: wrap; align-items: start; justify-content: space-between; gap: 4px 8px; }
+.catalog-hygiene-issue-source { display: flex; flex-wrap: wrap; gap: 3px 11px; margin: 0; }
+.catalog-hygiene-issue-code { color: var(--muted); font-size: .8rem; }
+.catalog-hygiene-evidence { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 145px), 1fr)); gap: 6px; }
+.catalog-hygiene-evidence > div { min-width: 0; padding: 5px 7px; border-radius: 5px; background: #f4f8f7; }
+.catalog-hygiene-evidence dt { color: var(--muted); font-size: .8rem; }
+.catalog-hygiene-evidence code { white-space: break-spaces; }
+.catalog-hygiene-references { padding-block: 5px; border-block-start: 1px solid var(--line); }
+.catalog-hygiene-references p { font-weight: 650; }
+.catalog-hygiene-related, .catalog-hygiene-references summary { color: var(--muted); }
+.catalog-hygiene-references summary { width: fit-content; min-height: 28px; padding-top: 4px; }
+@media (max-width: 720px) {
+  .catalog-hygiene-sources, .catalog-hygiene-issue-list { grid-template-columns: minmax(0, 1fr); }
+  .catalog-hygiene-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
