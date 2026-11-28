@@ -16,6 +16,8 @@ ImportMedic compares a Shopify, WooCommerce, or legacy BigCommerce product expor
 
 **Reorder PO Pack** is a second workflow inside **Inventory Sync**. Plan replenishment for one location using inventory quantities and up to three supplier cost catalogs, then download separate purchase order CSVs and a printable offline pack.
 
+**Auto-Categorize Rules** applies saved account and tax rules to a local transaction CSV. Review coverage and signed inclusive-tax splits, then download the categorized rows, account summary, audit, and offline sign-off for review.
+
 ## Run locally
 
 Use Node.js 24 and its bundled npm.
@@ -190,6 +192,14 @@ In **Issues & Review**, use **Tax Reconciliation (Net + Tax == Gross)** to check
 
 Use **Download Bookkeeper Sign-Off (.html)** to open or print the standalone report locally, including for a held CSV. It records the current repair state, source and platform, automatic and manual edit counts, physical CSV lines, exclusions, and totals by verified currency where available. Tax, duplicate, fee, currency, and running-balance evidence appears when applicable. Keep the current report with its source file and JSON audit. When the CSV is held, the report carries the original file fingerprint only.
 
+### Categorize transactions and split inclusive tax
+
+1. On `/`, open **Auto-Categorize Rules**. Choose **Load Synthetic SaaS & GCC/UK VAT Rule Pack Demo** or use **Choose Categorization CSV**. After a verified accounting repair with no manual edits or removed rows, **Use Current Source CSV** uses the original file bytes and physical lines when the headers are supported.
+2. Add or reorder rules, or use **Load Rule Pack (.json)** to reuse a saved pack. Check the payee or description matches and confirm the account, tax code, gross amount direction, and any inclusive rate for the current transactions. Use **Save Rule Pack (.json)** to reuse the current rules locally.
+3. Review the categorized percentage, unmatched and conflicting rows, calculated tax, and account summary by currency. Open a ready run's HTML sign-off offline and keep it with the source, rule pack, CSVs, and JSON audit. For a held run, use the audit's physical lines and rule IDs to resolve the issue. The CSVs and HTML stay withheld.
+
+These CSVs are for bookkeeping review. Confirm the codes and rates against your chart of accounts and the transaction records, then use your accounting software's applicable import workflow. [Supported transaction inputs, rule pack, and output contract](docs/subsystems/categorization.md)
+
 ### Verify file fingerprints
 
 Use **SHA-256 file fingerprints** in the price workbench to compare the baseline, supplier files, optional BOM, and available update and rollback CSVs with the JSON audit or Client Sign-Off HTML. An explicit XLSX worksheet selection is recorded alongside the original whole-workbook fingerprint. The single-file repair shows the source and available repaired CSV fingerprints with the same values in its JSON audit and Bookkeeper Sign-Off HTML. Hash the original files and the downloads before resaving them in a spreadsheet editor. A digest match verifies that the file bytes match the recorded fingerprint. Keep the audit or report with the files it references.
@@ -202,7 +212,7 @@ From the source checkout with its locked dependencies installed, use `npm run --
 npm run --silent repair-cli -- --mode repair --platform xero-bank fixtures/xero-bank/balance-verified.csv --out-dir ./batches/xero-demo
 ```
 
-Use a separate output directory for each run. All nine explicit modes write `custody-manifest.json` alongside their available results.
+Use a separate output directory for each run. All ten explicit modes write `custody-manifest.json` alongside their available results.
 
 | Mode | Use it to prepare |
 | --- | --- |
@@ -215,6 +225,7 @@ Use a separate output directory for each run. All nine explicit modes write `cus
 | `inventory-sync` | A Shopify inventory update and matched rollback for one location, JSON audit, and offline Inventory Sign-Off |
 | `cost-creep` | A multi-period supplier history CSV, JSON audit, and offline Vendor Negotiation Brief |
 | `purchase-order` | A supplier split PO pack with one CSV per chosen supplier, a consolidated summary, a JSON audit, and printable offline HTML |
+| `categorize` | A categorized transaction CSV, a per-currency account summary, a JSON audit, and offline Bookkeeper Categorization Sign-Off |
 
 Exit `0` means the local run passed. Exit `2` means the run held the CSV or rejected the candidate and left diagnostic files. Exit `1` means an argument, input/output, or execution error. The unsigned manifest lists the SHA-256 of the original input bytes and each emitted result. Keep it with the originals and outputs to check for byte changes.
 
@@ -223,6 +234,8 @@ Pass a saved Supplier Recipe JSON to `price-diff` with its supplier file. Review
 For an Amazon Price & Quantity batch, run `price-diff` with `--platform amazon` and a single proposal file. Use the actual downloaded pair as inputs for `verify` with the original baseline. [Runnable Amazon TSV and CSV example](docs/subsystems/cli-automation.md#amazon-price-diff)
 
 For a reorder batch, use `--mode purchase-order` with one inventory CSV and one to three supplier catalogs. Set the location, worksheet, and supplier policy for the current files. [Runnable PO split and hold examples](docs/subsystems/cli-automation.md#purchase-order)
+
+For a bookkeeping review batch, use `--mode categorize` with a transaction CSV and `--rules <rules.json>`. Compare the CSV and HTML bytes against the audit before resaving the downloads. [Runnable categorization and hold examples](docs/subsystems/cli-automation.md#categorize)
 
 ## Verify local processing
 

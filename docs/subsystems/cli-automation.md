@@ -207,6 +207,26 @@ The first command exits `0`. East has 3 units of SKU `00123` available, exactly 
 
 The second command exits `2`. Check physical line 2 of `invalid-offers.csv` for the invalid case pack. The directory contains `po-audit.json` and `custody-manifest.json` only. [Reorder calculation and file custody](purchase-order.md)
 
+## categorize
+
+Give one positional transaction CSV and a `--rules <rules.json>` rule pack. Use a fresh `--out-dir` for each batch.
+
+| Flag | Value or use |
+| --- | --- |
+| `--rules <rules.json>` | Required version 1 rule pack. Rule order sets priority. |
+| `--currency <ISO>` | Confirm the source's two-decimal currency when the input lacks a currency column. Plain amounts without a confirmed currency stay in a separate unspecified group. |
+| `--credit-debit-convention` | Required only for split Debit and Credit columns. `bank` makes Debit negative. `intuit` makes Credit negative. |
+| `--workspace-profile <profile.json>` | Apply saved Agency Sign-Off Branding in the offline HTML. |
+
+```sh
+npm run --silent repair-cli -- --mode categorize fixtures/m23/transactions.csv --rules fixtures/m23/rules.json --out-dir ./batches/categorize-demo
+npm run --silent repair-cli -- --mode categorize fixtures/m23/transactions.csv --rules fixtures/m23/conflict-rules.json --out-dir ./batches/categorize-hold
+```
+
+The first command exits `0` and writes `categorized-transactions.csv`, `account-summary.csv`, `categorization-audit.json`, `bookkeeper-categorization-sign-off.html`, and `custody-manifest.json`. Check four categorized rows out of five. At physical lines 2 and 3, the synthetic 20% and 5% rules split gross −120.00 GBP and −105.00 AED into net −100.00 each and tax −20.00 GBP and −5.00 AED. The 12.00 GBP refund at line 4 splits into 10.00 net and 2.00 tax. Keep the currency totals separate.
+
+The second command exits `2`. Check physical line 2 for the conflicting rule IDs `aws-uk` and `aws-overlap`. The directory contains only `categorization-audit.json` and `custody-manifest.json`. [Inputs, split arithmetic, and review files](categorization.md)
+
 ## Legacy single-file repair
 
 Keep `--mode` absent for the original single-file interface.

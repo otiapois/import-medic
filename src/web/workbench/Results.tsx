@@ -5,6 +5,7 @@ import type { RepairIssue } from '../../core/types';
 import { BalanceAudit } from './BalanceAudit';
 import { ExportActions, Inquiry } from './downloads';
 import type { RepairDownload } from './downloads';
+import { CSV_ENCODING_LABELS } from './fileDisplay';
 import { PAGE_SIZE, Pagination, pagination, usePagination } from './Pagination';
 import { TabBar } from './TabBar';
 import { useWorkerPage } from './useWorkerPage';
@@ -19,14 +20,6 @@ const RESULT_TABS = [
 
 type ResultsTab = (typeof RESULT_TABS)[number]['id'];
 type IssueFilter = 'all' | 'review' | 'fixed';
-
-const ENCODINGS = {
-  'utf-8': 'UTF-8',
-  'utf-8-bom': 'UTF-8 BOM',
-  'windows-1252': 'Windows-1252',
-  'utf-16le': 'UTF-16LE',
-  unknown: 'Unknown encoding',
-};
 
 interface ResultPage {
   worker: WorkbenchWorker;
@@ -61,7 +54,7 @@ export function Results({ result, worker, current, busy, guardEnabled, onEdit, o
             <h2 id={`${id}-heading`}>Repair results</h2>
             <p className="result-filename">{result.filename}</p>
           </div>
-          <p className="result-format">{ENCODINGS[result.detectedEncoding]} <span aria-hidden="true">/</span> {result.detectedLineEnding === 'mixed' ? 'Mixed line endings' : result.detectedLineEnding.toUpperCase()}</p>
+          <p className="result-format">{CSV_ENCODING_LABELS[result.detectedEncoding]} <span aria-hidden="true">/</span> {result.detectedLineEnding === 'mixed' ? 'Mixed line endings' : result.detectedLineEnding.toUpperCase()}</p>
         </div>
         {current ? (
           <dl className="summary-grid repair-summary" aria-live="polite">

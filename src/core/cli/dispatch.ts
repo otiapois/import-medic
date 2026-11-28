@@ -1,4 +1,5 @@
 import { PLATFORM_IDS, repairCsvWithBytes, type RepairOptions } from '..';
+import { categorizationFilenames, categorizeTransactions, type CategorizationInput } from '../accounting/categorization-rules';
 import { buildAmazonPriceDiff } from '../amazon-price-diff';
 import { sha256, type PriceCustody, type RepairCustody } from '../audit/custody';
 import { buildInventorySync, inspectInventorySupplier, type InventorySupplierSource, type InventorySyncOptions } from '../inventory-sync/engine';
@@ -20,7 +21,7 @@ import { parseWooCommerceBaseline } from '../woocommerce-price-diff';
 import { repairAudit } from '../worker/repair-views';
 import { runPriceComparison } from '../whatif/simulator';
 
-export const cliModes = ['repair', 'price-diff', 'verify', 'promo', 'supplier-delta', 'migrate', 'inventory-sync', 'cost-creep', 'purchase-order'] as const;
+export const cliModes = ['repair', 'price-diff', 'verify', 'promo', 'supplier-delta', 'migrate', 'inventory-sync', 'cost-creep', 'purchase-order', 'categorize'] as const;
 export const storePlatforms = ['shopify', 'woocommerce', 'bigcommerce'] as const satisfies readonly StorePlatform[];
 export const importPlatforms = [...storePlatforms, 'amazon'] as const satisfies readonly ImportPlatform[];
 export type CliMode = typeof cliModes[number];
@@ -63,6 +64,7 @@ export type CliRequest =
   | { mode: 'inventory-sync'; baseline: CliFile; suppliers: CliInventorySupplier[]; options: InventorySyncOptions }
   | { mode: 'cost-creep'; periods: readonly CostCreepPeriod[]; options?: CostCreepOptions }
   | { mode: 'purchase-order'; baseline: CliFile; suppliers: readonly PurchaseOrderSupplier[]; options?: PurchaseOrderOptions }
+  | ({ mode: 'categorize' } & CategorizationInput)
   | { mode: 'migrate'; source: CliFile; sourcePlatform: StorePlatform; targetPlatform: StorePlatform };
 
 const utf8 = new TextEncoder();
@@ -219,6 +221,16 @@ async function supplierDelta(previous: DeltaSource, next: DeltaSource): Promise<
 export async function dispatchCli(request: CliRequest): Promise<CliResult> {
   switch (request.mode) {
     case 'repair': return repair(request);
+    case 'categorize': {
+      const { status, artifacts: { categorizedCsv, accountSummaryCsv, auditJson, signoffHtml } } = await categorizeTransactions(request);
+      const filenames = categorizationFilenames;
+      const audit = artifact('audit', filenames.auditJson, auditJson);
+      return categorizedCsv !== null && accountSummaryCsv !== null && signoffHtml !== null
+        ? result(status, artifact('categorized', filenames.categorizedCsv, categorizedCsv),
+          artifact('account-summary', filenames.accountSummaryCsv, accountSummaryCsv), audit,
+          artifact('sign-off', filenames.signoffHtml, signoffHtml))
+        : result(status, audit);
+    }
     case 'price-diff': {
       if (request.platform !== 'amazon') return priceDiff(request);
       const { status, updateBytes, rollbackBytes, fileNames, auditJson } = await buildAmazonPriceDiff(request.baseline, request.proposal);

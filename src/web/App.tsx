@@ -64,7 +64,7 @@ export function App({ page }: { page: Page }) {
           <p>{page.description}</p>
         </div>
         <SignoffBrandingProvider>
-          {priceStudio ? <PriceDiffWorkbench characterKeys={characterKeys} /> : <Workbench initialPlatform={page.platform} />}
+          {priceStudio ? <PriceDiffWorkbench characterKeys={characterKeys} /> : <Workbench initialPlatform={page.platform} showCategorization={page.path === '/'} />}
         </SignoffBrandingProvider>
         <div className="site-guidance">
           <section aria-labelledby="examples-heading">

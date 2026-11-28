@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "conflictPolicy": "fail-on-ambiguous-match",
+  "rules": [
+    {
+      "id": "aws-uk",
+      "label": "AWS UK cloud services",
+      "matchType": "starts-with",
+      "pattern": "AWS UK Cloud",
+      "direction": "any",
+      "accountCode": "6100",
+      "accountName": "Cloud services",
+      "taxCode": "UK-VAT20",
+      "inclusiveTaxRateBps": 2000
+    },
+    {
+      "id": "aws-overlap",
+      "label": "Alternative AWS treatment",
+      "matchType": "exact",
+      "pattern": "AWS UK Cloud",
+      "direction": "debit",
+      "accountCode": "6110",
+      "accountName": "Hosted infrastructure",
+      "taxCode": "NO-TAX"
+    }
+  ]
+}

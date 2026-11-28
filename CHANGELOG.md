@@ -1,5 +1,11 @@
 # Changelog
 
+## v2.3.0 (M23)
+
+- Open **Auto-Categorize Rules** in the home workbench to apply reusable local rule packs to transaction CSVs. Match literal payee or description text, transaction direction, and optional amount bounds to assign account and tax codes. Review unmatched transactions and hold batches with conflicting rules or unmatched amounts above a configured threshold.
+- Split inclusive gross into signed net and tax amounts that add back to gross to the cent. Download a categorized transaction CSV, an account summary grouped by currency, an audit with SHA-256 fingerprints, and a branded offline Bookkeeper Categorization Sign-Off. Held runs retain the audit.
+- Run the same calculation with `repair-cli --mode categorize` using a saved rule pack. Seeded tests cover cent conservation, rule pack roundtrips, and conflict holds.
+
 ## v2.2.0 (M22)
 
 - Open **Inventory Sync > Reorder PO Pack** in Price Update Studio to plan replenishment for a selected location using one to three supplier CSV or XLSX catalogs. The reorder point is inclusive. Order quantities meet each supplier's minimum order quantity and case-pack multiple, and supplier comparison uses the exact extended subtotal after that rounding.

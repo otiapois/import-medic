@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { DragEvent } from 'react';
 import type { WorkbenchWorker } from '../core/worker/client';
 import type { RepairSummary } from '../core/worker/protocol';
@@ -23,6 +23,8 @@ import { downloadFile } from './workbench/downloads';
 import type { RepairDownload } from './workbench/downloads';
 import { useWorkerSession, WorkerStatus } from './workbench/workerSession';
 
+const CategorizationPanel = lazy(() => import('./workbench/categorization/CategorizationPanel'));
+
 const PLATFORMS = [
   { id: 'shopify-products', label: 'Shopify Products' },
   { id: 'quickbooks-bank', label: 'QuickBooks Bank' },
@@ -39,9 +41,9 @@ const DEFAULT_OPTIONS: Record<PlatformId, RepairOptions> = {
   'freshbooks-expenses': { dateOrder: 'auto' },
 };
 
-type SourceFile = { filename: string } & ({ sample: true; bytes: Uint8Array } | { sample: false; file: File });
+export type SourceFile = { filename: string } & ({ sample: true; bytes: Uint8Array } | { sample: false; file: File });
 
-export function Workbench({ initialPlatform }: { initialPlatform: PlatformId }) {
+export function Workbench({ initialPlatform, showCategorization }: { initialPlatform: PlatformId; showCategorization: boolean }) {
   const { branding } = useSignoffBranding();
   const id = useId();
   const [platform, setPlatform] = useState(initialPlatform);
@@ -52,6 +54,7 @@ export function Workbench({ initialPlatform }: { initialPlatform: PlatformId }) 
   const [dragging, setDragging] = useState(false);
   const [fileError, setFileError] = useState('');
   const [confirmedSuggestion, setConfirmedSuggestion] = useState(false);
+  const [categorizationOpened, setCategorizationOpened] = useState(false);
   const loaded = useRef<{ source: SourceFile; worker: WorkbenchWorker } | null>(null);
   const { run, invalidate, reset, cancel, resume, paused, progress, error, finished } = useWorkerSession();
   const options = platformOptions[platform];
@@ -334,6 +337,20 @@ export function Workbench({ initialPlatform }: { initialPlatform: PlatformId }) 
           {edits.length ? <p className="field-help">Browser cell corrections stay in this session. Apply those corrections to a local copy of the source before replaying it.</p> : null}
         </LocalCliCommand>
       </div>
+      {showCategorization ? (
+        <details className="categorization-drawer" onToggle={(event) => {
+          if (event.target === event.currentTarget && event.currentTarget.open) setCategorizationOpened(true);
+        }}>
+          <summary data-testid="categorization-toggle">Auto-Categorize Rules</summary>
+          {categorizationOpened ? (
+            <Suspense fallback={<p className="field-help" role="status">Opening auto-categorization…</p>}>
+              <CategorizationPanel currentSource={current && source && platform !== 'shopify-products' && platform !== 'freshbooks-expenses'
+                && report.result.canDownload && !report.result.warnings && !report.result.needsManualReviewCount
+                && !report.result.removedRowCount && !edits.length ? { source, headers: report.result.sourceHeaders } : null} />
+            </Suspense>
+          ) : null}
+        </details>
+      ) : null}
     </section>
   );
 }

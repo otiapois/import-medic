@@ -27,6 +27,8 @@ const m21SpawnTimeout = 40_000;
 const m21TestTimeout = 100_000;
 const poSpawnTimeout = 40_000;
 const poTestTimeout = 100_000;
+const categorizeSpawnTimeout = 40_000;
+const categorizeTestTimeout = 160_000;
 let scratch: string;
 
 beforeAll(() => {
@@ -82,6 +84,47 @@ function verifyReceipt(mode: string, code: 0 | 2, status: string, directory: str
 
 const pricingHeaders = 'Handle,Title,Option1 Name,Option1 Value,Variant SKU,Variant Price,Variant Compare At Price,Cost per item\n';
 const catalog = (price: string) => pricingHeaders + `part,Spare Part,Title,Default Title,0001,${price},,5.00\nkit,Bundle,Title,Default Title,KIT,20.00,,10.00\n`;
+
+describe('M23 categorization CLI subprocess', () => {
+  const source = fixture('m23/transactions.csv');
+  const rules = fixture('m23/rules.json');
+  const conflictRules = fixture('m23/conflict-rules.json');
+  const categorized = 'categorized-transactions.csv';
+  const summary = 'account-summary.csv';
+  const auditName = 'categorization-audit.json';
+  const signoff = 'bookkeeper-categorization-sign-off.html';
+
+  it('publishes only verified artifacts and preserves an existing batch on a held rerun', () => {
+    const profile = content('categorization-profile.json', JSON.stringify({ version: 1, storeName: 'Example Client', platform: 'shopify', storeCurrency: 'GBP', branding: {
+      agencyName: 'Ledger team', preparedFor: 'Example Client', contactNote: 'Markup <strong> //office.invalid', accentKey: 'navy',
+    } }));
+    const ready = resolve(scratch, 'categorization-ready');
+    verifyReceipt('categorize', 0, 'ready', ready, [source, '--rules', rules, '--workspace-profile', profile],
+      { source, rules, 'workspace-profile': profile }, [categorized, summary, auditName, signoff], undefined, categorizeSpawnTimeout);
+    const readReady = (name: string) => readFileSync(resolve(ready, name));
+    const audit = JSON.parse(readReady(auditName).toString('utf8'));
+    expect(audit.metrics).toEqual({ totalRows: 5, categorizedRows: 4, uncategorizedRows: 1, ambiguousConflicts: 0 });
+    expect(audit.custody.outputs.map(({ sha256 }: { sha256: string }) => sha256)).toEqual([categorized, summary, signoff].map(name => digest(readReady(name))));
+    expect(audit.custody.workspaceProfile.sha256).toBe(digest(readFileSync(profile)));
+    expect(readReady(signoff).toString('utf8')).toContain('Prepared by <strong>Ledger team</strong>');
+    expect(readReady(signoff).toString('utf8')).not.toContain('//office.invalid');
+    const transactions = parseCsv(readReady(categorized).toString('utf8')).records;
+    expect(transactions[1].cells.slice(5)).toEqual(['6100', 'Cloud services', 'UK-VAT20', '-100.00', '-20.00', 'aws-uk']);
+    expect(transactions[2].cells.slice(5)).toEqual(['6100', 'Cloud services', 'UAE-VAT5', '-100.00', '-5.00', 'aws-uae']);
+
+    const held = resolve(scratch, 'categorization-held');
+    verifyReceipt('categorize', 2, 'blocked', held, [source, '--rules', conflictRules], { source, rules: conflictRules },
+      [auditName], undefined, categorizeSpawnTimeout);
+    const diagnostic = JSON.parse(readFileSync(resolve(held, auditName), 'utf8'));
+    expect(diagnostic.issues).toMatchObject([{ code: 'ambiguous-rule-match', line: 2, matchingRuleIds: ['aws-uk', 'aws-overlap'] }]);
+    expect(diagnostic.custody).not.toHaveProperty('outputs');
+
+    const existing = cli(['--mode', 'categorize', source, '--rules', conflictRules, '--out-dir', ready], root, categorizeSpawnTimeout);
+    expect(existing.status).toBe(1);
+    expect(existing.stderr).toContain('Existing artifacts were preserved.');
+    expect(digest(readReady(categorized))).toBe(audit.custody.outputs[0].sha256);
+  }, categorizeTestTimeout);
+});
 
 describe('M22 purchase order CLI subprocess', () => {
   const baseline = fixture('purchase-order/store-inventory.csv');

@@ -269,6 +269,9 @@ code { font-family: var(--mono); }
 }
 
 .workbench-results { margin-top: 18px; }
+.categorization-drawer { margin-top: 4px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.categorization-drawer > summary { min-height: 44px; padding: 11px 25px; color: var(--teal-strong); font-weight: 710; }
+.categorization-drawer > .field-help { padding: 0 25px 12px; }
 .results-heading {
   display: flex;
   align-items: flex-start;
@@ -851,6 +854,7 @@ code { font-family: var(--mono); }
   .site-intro p { margin-top: 11px; font-size: .97rem; }
   .mode-navigation, .price-section, .price-studio-tabs { padding-inline: 16px; }
   .workbench-platforms, .workbench-platform-panel { padding: 16px; }
+  .categorization-drawer > summary, .categorization-drawer > .field-help { padding-inline: 16px; }
   .workbench-platform-panel { grid-template-columns: minmax(0, 1fr); gap: 16px; }
   .workbench-sidebar { gap: 12px; }
   .drop-zone { min-height: 162px; }

@@ -2,6 +2,7 @@ import { lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSyn
 import { basename, dirname, join, parse, resolve, sep } from 'node:path';
 import { parseArgs } from 'node:util';
 import { z } from 'zod';
+import { creditDebitConventions } from '../src/core/accounting/categorization-rules';
 import { amazonFileExtension } from '../src/core/amazon-price-diff';
 import { sha256, type RepairCustody } from '../src/core/audit/custody';
 import { cliModes, createCustodyManifest, dispatchCli, importPlatforms, storePlatforms, type CliArtifact, type CliInventorySupplier, type CliRequest, type DeltaSource, type PriceSupplier } from '../src/core/cli/dispatch';
@@ -110,6 +111,7 @@ const modeFlags = {
     'baseline-sku-column', 'baseline-sku-column-b64', 'baseline-retail-column', 'baseline-retail-column-b64', 'workspace-profile'],
   'purchase-order': ['baseline', ...orderSupplierFlags, 'reorder-point', 'target-stock', 'supplier-policy',
     'target-location', 'target-location-b64', 'po-reference', 'po-reference-b64', 'workspace-profile'],
+  categorize: ['rules', 'currency', 'credit-debit-convention', 'workspace-profile'],
   migrate: ['source-platform', 'target-platform'],
 };
 const booleanFlags = new Set(['help', 'exclude-paypal-memo', 'formula-guard', ...checks.map(check => `confirm-${check}`),
@@ -129,6 +131,7 @@ const modeUsage = {
   'inventory-sync': '--baseline <csv> --supplier <csv|xlsx> [--sheet <name>] --sku-column <header|1-based position> --quantity-column <header|1-based position> … [--target-location <name>]',
   'cost-creep': '--period <csv|xlsx> --period-label <label> [--period-sheet <name>] [--period-sku-column <header>] [--period-cost-column <header>] … [--baseline <csv>]',
   'purchase-order': '--baseline <csv> --supplier <csv|xlsx> [--supplier-label <label>] [--sheet <name>] … [--reorder-point <integer>] [--target-stock <integer>] [--supplier-policy <policy>] [--target-location <name>] [--po-reference <reference>] [--workspace-profile <json>]',
+  categorize: '<input.csv> --rules <json> [--currency <ISO>] [--credit-debit-convention <bank|intuit>] [--workspace-profile <json>]',
   migrate: '--source-platform <store> --target-platform <store> <input.csv>',
 };
 
@@ -235,7 +238,7 @@ async function explicitMain(args: string[]) {
     process.stdout.write(`Usage: npm run repair-cli -- --mode ${mode} ${modeUsage[mode]} --out-dir <dir>\nOptions: ${modeFlags[mode].map(name => '--' + name).join(', ')}\n`);
     return;
   }
-  const expectInput = mode === 'repair' || mode === 'migrate';
+  const expectInput = mode === 'repair' || mode === 'migrate' || mode === 'categorize';
   if (positionals.length !== (expectInput ? 1 : 0)) throw new Error(expectInput ? 'Provide exactly one CSV input path.' : `Use named input paths for ${mode}.`);
 
   const option = (name: string) => values[name] as string | undefined;
@@ -289,6 +292,13 @@ async function explicitMain(args: string[]) {
   const number = (value: string) => Number(rowNumber.parse(value));
   let request: CliRequest;
   switch (mode) {
+    case 'categorize': {
+      const profilePath = option('workspace-profile');
+      request = { mode, csv: read('source', positionals[0], csv), rulePack: read('rules', required('rules'), /\.json$/i),
+        sourceCurrency: option('currency'), creditDebitConvention: z.enum(creditDebitConventions).optional().parse(option('credit-debit-convention')),
+        workspaceProfile: profilePath === undefined ? undefined : read('workspace-profile', profilePath, /\.json$/i) };
+      break;
+    }
     case 'repair': {
       const { platform, ...options } = cliOptions.parse({ platform: option('platform'), dateOrder: option('date-order'),
         qboLayout: option('qbo-layout'), qboCreditDebit: option('qbo-credit-debit'), stripePayPalOutput: option('stripe-paypal-output'),

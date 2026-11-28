@@ -121,7 +121,7 @@ export async function auditPage(page: Page, phase: 'idle' | 'dialog' | 'workbenc
       if (el instanceof HTMLInputElement && ['checkbox', 'radio', 'range'].includes(el.type)) {
         const key = [el.type, el.checked, ...outside, getComputedStyle(el).accentColor].join('/');
         if (!nativeStyles.has(key)) { native.push({ index, type: el.type, background: outside }); nativeStyles.add(key); }
-      } else if (el.matches('a,summary,button,input,select,textarea')) {
+      } else if (el.matches('a,summary,button,input,select,textarea') && !el.matches('button[aria-disabled="true"]')) {
         const hasBorder = parseFloat(style.borderTopWidth) > 0 && !['none', 'hidden'].includes(style.borderTopStyle);
         const boundary = Math.max(ratio(bg, outside), hasBorder ? ratio(paint(owner, style.borderTopColor), outside) : 1);
         const textCue = owner.matches('a,summary,.text-button') || (!hasBorder && owner.matches('button,[tabindex="0"]'));

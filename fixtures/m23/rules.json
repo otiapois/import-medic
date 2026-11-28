@@ -1,0 +1,38 @@
+{
+  "schemaVersion": 1,
+  "unmappedReviewThresholdCents": 5000,
+  "rules": [
+    {
+      "id": "aws-uk",
+      "label": "AWS UK cloud services",
+      "matchType": "starts-with",
+      "pattern": "AWS UK Cloud",
+      "direction": "any",
+      "accountCode": "6100",
+      "accountName": "Cloud services",
+      "taxCode": "UK-VAT20",
+      "inclusiveTaxRateBps": 2000
+    },
+    {
+      "id": "aws-uae",
+      "label": "AWS UAE cloud services",
+      "matchType": "starts-with",
+      "pattern": "AWS UAE Cloud",
+      "direction": "any",
+      "accountCode": "6100",
+      "accountName": "Cloud services",
+      "taxCode": "UAE-VAT5",
+      "inclusiveTaxRateBps": 500
+    },
+    {
+      "id": "shopify",
+      "label": "Shopify subscription",
+      "matchType": "exact",
+      "pattern": "Shopify",
+      "direction": "debit",
+      "accountCode": "6200",
+      "accountName": "Software subscriptions",
+      "taxCode": "NO-TAX"
+    }
+  ]
+}

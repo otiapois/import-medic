@@ -4,6 +4,7 @@ import fc from 'fast-check';
 import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { describe, expect, it } from 'vitest';
 import { repairCsv, repairCsvWithBytes } from '../../../src/core';
+import { categorizeTransactions, serializeRulePack, splitInclusiveTax, validateRulePack, type BookkeeperRule } from '../../../src/core/accounting/categorization-rules';
 import { buildAmazonPriceDiff } from '../../../src/core/amazon-price-diff';
 import { sha256 } from '../../../src/core/audit/custody';
 import { analyzeCatalogImpact, createCatalogImpact } from '../../../src/core/analytics/catalog-impact';
@@ -2316,7 +2317,87 @@ describe('M22 deterministic purchase order property replay', () => {
   }, 120_000);
 });
 
-it('accounts for all 42,720 seeded executions without skips', () => {
-  expect(fuzzExecutions).toEqual({ accepted: 42_720, discarded: 0, properties: 70 });
+describe('M23 deterministic Bookkeeper categorization replay', () => {
+  const rule: BookkeeperRule = { id: 'cloud', label: 'Cloud service', matchType: 'contains', pattern: 'Café [.*]+', direction: 'any',
+    accountCode: '00120', accountName: 'Cloud services', taxCode: 'VAT', inclusiveTaxRateBps: 2000 };
+  const file = (rules: BookkeeperRule[], conflictPolicy?: 'first-match-wins') =>
+    ({ filename: 'rules.json', bytes: bytes(serializeRulePack({ schemaVersion: 1, rules, ...(conflictPolicy ? { conflictPolicy } : {}) })) });
+  const magnitude = (value: bigint) => value < 0n ? -value : value;
+
+  it('preserves signed cents, selects the nearest net and forces exact ties to even', () => {
+    checkFuzz(fc.property(
+      fc.bigInt({ min: -(10n ** 30n), max: 10n ** 30n }), fc.integer({ min: 0, max: 2500 }), fc.boolean(),
+      fc.constantFrom('wide', 'one-cent', 'tie-even', 'tie-odd'), (wide, rate, negative, mode) => {
+        const gross = (negative ? -1n : 1n) * (mode === 'wide' ? wide : mode === 'one-cent' ? 1n : mode === 'tie-even' ? 21n : 27n);
+        const bps = mode.startsWith('tie') ? 2000 : rate;
+        const { netCents, taxCents } = splitInclusiveTax(gross, bps);
+        const denominator = 10_000n + BigInt(bps);
+        const residual = magnitude(netCents * denominator - gross * 10_000n);
+        expect(netCents + taxCents).toBe(gross);
+        expect(residual * 2n).toBeLessThanOrEqual(denominator);
+        if (residual * 2n === denominator) expect(netCents % 2n).toBe(0n);
+        expect(magnitude(netCents) + magnitude(taxCents)).toBe(magnitude(gross));
+        const inverse = splitInclusiveTax(-gross, bps);
+        expect(inverse).toEqual({ netCents: -netCents, taxCents: -taxCents });
+      },
+    ), { seed: seed + 70, numRuns: 1_150 });
+  });
+
+  it('reparses both protected CSVs and reconciles each currency separately, including uncategorized lines', async () => {
+    const amounts = fc.tuple(fc.integer({ min: -100_000, max: 100_000 }), fc.integer({ min: -100_000, max: 100_000 }), fc.integer({ min: -100_000, max: 100_000 }));
+    await checkAsyncFuzz(fc.asyncProperty(amounts, fc.integer({ min: 0, max: 2500 }), fc.integer({ min: 1, max: 8 }), async (raw, rate, newlines) => {
+      const gross = raw.map(BigInt);
+      const source = [['first\r\n'.repeat(newlines), ' cafe\u0301 [.*]+ ', cents(gross[0]), 'AED'],
+        ['CAFÉ [.*]+', '', cents(gross[1]), 'GBP'], ['Elsewhere', '', cents(gross[2]), 'GBP']];
+      const csv = { filename: 'transactions.csv', bytes: csvBytes(['Description', 'Payee', 'Amount', 'Currency'], source) };
+      const result = await categorizeTransactions({ csv, rulePack: file([{ ...rule, inclusiveTaxRateBps: rate }]) });
+      expect(result).toMatchObject({ status: 'ready', issues: [], metrics: { categorizedRows: 2, uncategorizedRows: 1, ambiguousConflicts: 0 } });
+      expect(result.rows.map(row => row.line)).toEqual([2, 3 + newlines, 4 + newlines]);
+      const decode = (value: Uint8Array) => parseCsv(new TextDecoder().decode(value)).records;
+      const [categorized, summary] = [decode(result.artifacts.categorizedCsv!), decode(result.artifacts.accountSummaryCsv!)];
+      expect(categorized.slice(1).map(row => row.cells.slice(0, 4))).toEqual(source);
+      expect(summary).toHaveLength(4);
+      for (const [index, row] of result.rows.entries()) {
+        const { netCents, taxCents } = splitInclusiveTax(gross[index], index === 2 ? 0 : rate);
+        expect(categorized[index + 1].cells.slice(7, 9)).toEqual([cents(netCents), cents(taxCents)]);
+        expect(summary[index + 1].cells.slice(5)).toEqual([cents(gross[index]), cents(netCents), cents(taxCents)]);
+        expect(BigInt(row.grossCents!)).toEqual(netCents + taxCents);
+      }
+      expect(result.currencyTotals.map(row => BigInt(row.grossCents))).toEqual([gross[0], gross[1] + gross[2]]);
+      for (const total of result.currencyTotals) {
+        const groups = result.accountSummary.filter(item => item.currency === total.currency);
+        for (const field of ['grossCents', 'netCents', 'taxCents'] as const) {
+          expect(groups.reduce((sum, item) => sum + BigInt(item[field]), 0n)).toBe(BigInt(total[field]));
+        }
+      }
+    }), { seed: seed + 71, numRuns: 800 });
+  }, 120_000);
+
+  it('roundtrips an ordered strict pack and holds ambiguous assignments at their physical line', async () => {
+    await checkAsyncFuzz(fc.asyncProperty(
+      fc.nat({ max: 2500 }), fc.integer({ min: 1, max: 10_000 }), fc.integer({ min: 1, max: 9 }), fc.boolean(),
+      async (rate, absolute, newlines, credit) => {
+        const [first, second] = [{ ...rule, inclusiveTaxRateBps: rate }, { ...rule, id: 'other', accountCode: '999', taxCode: 'DIFFERENT' }];
+        const rules = credit ? [second, first] : [first, second];
+        const expectedIds = rules.map(item => item.id);
+        const rulePack = file(rules);
+        const parsed = validateRulePack(rulePack.bytes);
+        expect(parsed).toEqual({ ok: true, value: { schemaVersion: 1, rules } });
+        expect(validateRulePack(bytes(JSON.stringify({ schemaVersion: 1, rules, unknown: absolute })))).toMatchObject({ ok: false });
+        const raw = ['CAFÉ [.*]+', cents(BigInt(credit ? absolute : -absolute)), 'GBP'];
+        const csv = { filename: 'transactions.csv', bytes: csvBytes(['Description', 'Amount', 'Currency'], [['other\n'.repeat(newlines), '0.01', 'AED'], raw]) };
+        const held = await categorizeTransactions({ csv, rulePack });
+        expect(held).toMatchObject({ status: 'blocked', issues: [{ line: 3 + newlines, raw: raw.join(','), matchingRuleIds: expectedIds }],
+          artifacts: { categorizedCsv: null, accountSummaryCsv: null, signoffHtml: null } });
+        expect(held.custody).not.toHaveProperty('outputs');
+        const ordered = await categorizeTransactions({ csv, rulePack: file(rules, 'first-match-wins') });
+        expect(ordered).toMatchObject({ status: 'ready', rows: [{ matchedRuleId: null }, { matchedRuleId: expectedIds[0], matchingRuleIds: expectedIds }] });
+      },
+    ), { seed: seed + 72, numRuns: 650 });
+  }, 120_000);
+});
+
+it('accounts for all 45,320 seeded executions without skips', () => {
+  expect(fuzzExecutions).toEqual({ accepted: 45_320, discarded: 0, properties: 73 });
   console.info(`Deterministic fuzz: ${fuzzExecutions.accepted} accepted, ${fuzzExecutions.discarded} discarded across ${fuzzExecutions.properties} properties.`);
 });
